@@ -105,6 +105,7 @@ class TRADE:
             lines.append(f" 掛金総額: {market['volume']}")
         lines.append(f" トークン名: {market.get('outcomes')}")
         lines.append(f" 価格: {market.get('outcomePrices')}")
+        lines.append(f" 終了日: {market.get('endDate')}")
         summary_text = "\n".join(lines)
         token_info = []
         token_name = json.loads(market.get('outcomes'))
@@ -247,9 +248,9 @@ class TRADE:
 if __name__=='__main__':
     t = TRADE()
     #print(t.get_event_detail(156613))
-    #print(t.get_market_detail(1157582))
-    id = t.get_self_status()
-    print(id)
+    #print(t.get_market_detail(1345937))
+    # id = t.get_self_status()
+    #print(id)
 
 
 

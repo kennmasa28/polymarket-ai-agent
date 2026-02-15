@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 import json
 from datetime import datetime
-
+import random
 
 def main(tag):
     tr = TRADE()
@@ -174,5 +174,5 @@ def main(tag):
         print(f"トークンを購入できませんでした。{log_path}を確認してください。")
 
 if __name__=='__main__':
-    for tag in config.TREAT_EVENT_TAG_LIST:
-        main(tag)
+    tag = random.choice(config.TREAT_EVENT_TAG_LIST)
+    main(tag)
