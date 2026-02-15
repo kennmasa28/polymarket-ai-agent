@@ -206,6 +206,7 @@ class Agent(object):
         response = self.openai_client.responses.create(
             model=self.model,
             input=conversation,
+            tools=[{"type": "web_search"}],
             reasoning={"effort": "medium"},
         )
 

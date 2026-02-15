@@ -14,7 +14,7 @@ import os
 from eth_account import Account
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs
-from py_clob_client.order_builder.constants import BUY
+from py_clob_client.order_builder.constants import BUY, SELL
 
 class TRADE:
     """
@@ -90,9 +90,13 @@ class TRADE:
         summary_text = "\n".join(lines)
         return summary_text
     
-    def get_market_detail(self, market_id: str):
-        url = f"{self.gemma_api_base}/markets/{market_id}"
-        market = self.get(url)
+    def get_market_detail(self, market_id: str, condition_id: str=""):
+        if condition_id == "":
+            url = f"{self.gemma_api_base}/markets/{market_id}"
+            market = self.get(url)
+        else:
+            url = f"{self.gemma_api_base}/markets?condition_ids={condition_id}"
+            market = self.get(url)[0]
         lines = []
         lines.append(f"■ マーケットID: {market.get('id')}")
         lines.append(f" conditionId: {market.get('conditionId')}")
@@ -154,7 +158,7 @@ class TRADE:
         
         return summary_text, token_info, img_base64
     
-    def make_book_order(self, token_id: str, price: float, size: int):
+    def make_book_order(self, token_id: str, price: float, size: int, side: str):
         signer = Account.from_key(self.private_key).address
 
         temp_client = ClobClient(self.clob_api_base, 
@@ -171,14 +175,25 @@ class TRADE:
                             funder=self.funder, 
                             signature_type=2)
 
-        resp = client.create_and_post_order(
-            OrderArgs(
-                token_id=token_id,
-                price=price,
-                size=size,
-                side=BUY,
+        if side == "B":
+            resp = client.create_and_post_order(
+                OrderArgs(
+                    token_id=token_id,
+                    price=price,
+                    size=size,
+                    side=BUY,
+                )
             )
-        )
+        else:
+            resp = client.create_and_post_order(
+                OrderArgs(
+                    token_id=token_id,
+                    price=price,
+                    size=size,
+                    side=SELL,
+                )
+            )
+
         # ===== ログ保存処理 =====
         log_dir = Path("transaction_logs")
         log_dir.mkdir(exist_ok=True)
@@ -193,10 +208,48 @@ class TRADE:
                 f.write(str(resp))
 
         return log_path
+    
+    def get_self_status(self):
+        url = f"{self.data_api_base}/positions"
+        params = {
+            "user": self.funder,
+        }
+        data = self.get(url, params=params)
+        self_status = []
+
+        for dat in data:
+            condition_id = dat['conditionId']
+            if dat['size'] * dat['avgPrice'] > dat['currentValue']:
+                status = 0
+            else:
+                status = 1
+            lines = []
+            lines.append(f"タイトル: {dat['title']}")
+            lines.append(f"あなたの所持トークン: {dat['outcome']}")
+            lines.append(f"あなたのトークン保有数: {dat['size']}")
+            lines.append(f"あなたのトークン購入時の平均買値(単価): ${dat['avgPrice']}")
+            lines.append(f"現在のトークン価値(単価): ${dat['currentValue'] / dat['size']}")
+            lines.append(f"あなたがトークン購入に費やした総額: ${dat['size'] * dat['avgPrice']}")
+            lines.append(f"今このトークンをすべて売却すると得られるお金: ${dat['currentValue']}")
+            lines.append(f"予想が当たった時、このトークンと交換できるお金: ${dat['size'] * 1.0}")
+            summary_text = "\n".join(lines)
+            self_status.append({
+                "condition_id": condition_id,
+                "status": status,
+                "text": summary_text,
+                "token": dat["asset"],
+                "size": dat['size'],
+                "price": dat['currentValue'] / dat['size']
+            })
+        return self_status
 
 
 if __name__=='__main__':
     t = TRADE()
-    print(t.get_event_detail(156613))
-    print(t.get_market_detail(1157582))
+    #print(t.get_event_detail(156613))
+    #print(t.get_market_detail(1157582))
+    id = t.get_self_status()
+    print(id)
+
+
 

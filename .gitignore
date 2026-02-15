@@ -210,3 +210,6 @@ img_logs/
 openai_logs/
 img_logs/
 full_logs/
+
+src/congig.py
+transaction_logs

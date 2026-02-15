@@ -7,14 +7,14 @@ import json
 from datetime import datetime
 
 
-def main():
+def main(tag):
     tr = TRADE()
     ag = Agent()
     full_log = ""
+    now_date = datetime.now().strftime("%Y/%m/%d")
     ## STEP 1: 参加イベントの候補を収集する。
     event_candidates = ""
-    for tag in config.TREAT_EVENT_TAG_LIST:
-        event_candidates += tr.get_recent_event_list(tag_slug=tag)
+    event_candidates = tr.get_recent_event_list(tag_slug=tag)
     full_log += f"==STEP 1==\n{event_candidates}\n\n"
 
     ## STEP 2: 詳細検討するイベントを一つ選び、その詳細を取得
@@ -30,6 +30,9 @@ def main():
         決着時：
         事象が起きた場合、YESトークンは1.00 USD、NOは0.00 USDになる。
         起きなかった場合は逆。
+
+        # 現在の日付
+        {now_date}
 
         # 指示
         現在、以下のテーマで予測市場が開催されている。
@@ -57,6 +60,9 @@ def main():
         事象が起きた場合、YESトークンは1.00 USD、NOは0.00 USDになる。
         起きなかった場合は逆。
 
+        # 現在の日付
+        {now_date}
+
         # 指示
         あなたは以下のテーマ（イベント）の予測市場に参加しようとしている。
         一つのテーマについて、複数のマーケットが開催されている。
@@ -83,6 +89,9 @@ def main():
         決着時：
         事象が起きた場合、YESトークンは1.00 USD、NOは0.00 USDになる。
         起きなかった場合は逆。
+
+        # 現在の日付
+        {now_date}
 
         # 指示
         あなたは以下のテーマ（イベント）の予測市場に参加しようとしている。
@@ -115,13 +124,16 @@ def main():
         事象が起きた場合、YESトークンは1.00 USD、NOは0.00 USDになる。
         起きなかった場合は逆。
 
+        # 現在の日付
+        {now_date}
+
         # 指示
         あなたは以下のテーマ（イベント）の予測市場に参加しようとしている。
         一つのテーマについて複数のマーケットが開催されており、あなたは以下のマーケットに参加する。
         あなたが参加するマーケットの詳細、本マーケットに関する専門家の意見、Yes, Noトークンの価格推移画像を与えるので、Yes, Noのトークンをいくつ購入するか決定してください。
         出力はtoken, sizeの値を決定する形で出力せよ。
         token: Yes, Noのどちらのトークンを買うか。'Yes'または'No'で回答すること（先頭のみ大文字）。
-        size: トークンをいくつ買うか、1-5の整数で回答せよ。自信があれば5に近く、自信がなければ1に近くせよ。
+        size: トークンをいくつ買うか、{config.MIN_BUY_TOKENS}-{config.MAX_BUY_TOKENS}の整数で回答せよ。自信があれば{config.MAX_BUY_TOKENS}に近く、自信がなければ{config.MIN_BUY_TOKENS}に近くせよ。
 
         # あなたが参加するマーケットの詳細
         {market_detail}
@@ -153,13 +165,14 @@ def main():
     
     if token_price is not None:
         try:
-            log_path = tr.make_book_order(token_id, token_price, size)
+            tlog_path = tr.make_book_order(token_id, token_price, size, side="B")
             print(f"{token}トークンを価格{token_price}で、{size}個購入しました。")
-            print(f"Order response saved to: {log_path}")
+            print(f"Order response saved to: {tlog_path}")
         except Exception as e:
             print(f"トークンを購入できませんでした。{e} {log_path}を確認してください。")
     else:
         print(f"トークンを購入できませんでした。{log_path}を確認してください。")
 
 if __name__=='__main__':
-    main()
+    for tag in config.TREAT_EVENT_TAG_LIST:
+        main(tag)
