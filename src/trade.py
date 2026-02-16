@@ -45,7 +45,7 @@ class TRADE:
             "limit": limit,
             "offset": 0,
             "tag_slug": tag_slug,
-            "order": "id",
+            "order": "volume24hr",
             "volume_min": volume_min,
             "ascending": "false",
         }
@@ -262,8 +262,9 @@ class TRADE:
 
 if __name__=='__main__':
     t = TRADE()
-    #print(t.get_event_detail(156613))
-    #print(t.get_market_detail(1345937))
+    # print(t.get_recent_event_list(tag_slug="ai"))
+    # print(t.get_event_detail(156613))
+    # print(t.get_market_detail(1345937))
     # id = t.get_self_status()
     #print(id)
 
