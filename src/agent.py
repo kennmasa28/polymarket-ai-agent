@@ -77,23 +77,38 @@ class Agent(object):
     def _save_openai_response_json(self, response_obj) -> str:
         """
         response_obj: openai.responses.create の返り値（Responseオブジェクト）
-        保存ファイル名: openai_log/YYYYmmdd_HHMMSS.json (Asia/Tokyo)
+        保存構造:
+            openai_log/
+                YYYYmmdd/
+                    HHMMSS.json
+        （Asia/Tokyo）
         """
-        ts = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(self.log_dir, f"{ts}.json")
 
-        # Responseオブジェクトはdict化して保存（SDK仕様差異に備えてフォールバックあり）
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
+
+        # 日付フォルダを作成
+        date_dir = os.path.join(self.log_dir, date_str)
+        os.makedirs(date_dir, exist_ok=True)
+
+        # ファイルパス生成
+        path = os.path.join(date_dir, f"{time_str}.json")
+
+        # Responseオブジェクトをdict化
         try:
-            data = response_obj.model_dump()  # 新しめのSDKで一般的
+            data = response_obj.model_dump()  # 新しめSDK
         except Exception:
             try:
                 data = response_obj.to_dict()
             except Exception:
-                # 最終フォールバック（シリアライズ可能な範囲のみ）
                 data = json.loads(json.dumps(response_obj, default=str))
 
+        # 保存
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+        return path
 
 
     def _extract_function_calls(self, response):

@@ -6,6 +6,7 @@ import os
 import json
 from datetime import datetime
 import random
+from zoneinfo import ZoneInfo
 
 def main(tag):
     tr = TRADE()
@@ -150,16 +151,24 @@ def main(tag):
             token_price = t['token_price']
             size = int(size)
             token_price=float(token_price)
+            if size*token_price < 1.0:
+                size = int(1.0/token_price) + 1
             break
     full_log += f"==STEP 5==\n{prompt}\n\n{token}\n{size}\n{token_price}\n\n"
 
     # full_logを保存
-    log_dir = Path("full_logs")
-    log_dir.mkdir(exist_ok=True)
+    now = datetime.now(ZoneInfo("Asia/Tokyo"))
+    date_str = now.strftime("%Y%m%d")
+    time_str = now.strftime("%H%M%S")
 
-    nowt = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = log_dir / f"{nowt}_{market_id}.txt"
+    # 日付ディレクトリ作成
+    log_dir = Path("full_logs") / date_str
+    log_dir.mkdir(parents=True, exist_ok=True)
 
+    # ファイルパス生成
+    log_path = log_dir / f"{time_str}_{market_id}.txt"
+
+    # 保存
     with open(log_path, "w", encoding="utf-8") as f:
         f.write(str(full_log))
     

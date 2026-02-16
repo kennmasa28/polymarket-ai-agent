@@ -8,7 +8,7 @@ DATA_API_BASE = "https://data-api.polymarket.com"
 TREAT_EVENT_TAG_LIST = ["trump", "ukraine", "economy", "technology", "japan"]
 CHAIN_ID = 137
 MIN_BUY_TOKENS = 5
-MAX_BUY_TOKENS = 7
+MAX_BUY_TOKENS = 8
 
 ## OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

@@ -11,6 +11,7 @@ import matplotlib.dates as mdates
 import base64
 from io import BytesIO
 import os
+from zoneinfo import ZoneInfo
 from eth_account import Account
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs
@@ -143,11 +144,19 @@ class TRADE:
         plt.ylabel('price of tokens')
         plt.legend()
         plt.tight_layout()
-        # 画像を保存
-        img_dir = Path("img_logs")
-        img_dir.mkdir(exist_ok=True)
-        nowt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        img_path = img_dir / f"{nowt}_{market_id}.png"
+        # 画像を保存（日付フォルダ分割）
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
+
+        # 日付ディレクトリ作成
+        img_dir = Path("img_logs") / date_str
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+        # ファイル名生成
+        img_path = img_dir / f"{time_str}_{market_id}.png"
+
+        # 保存
         plt.savefig(img_path, format="png", bbox_inches="tight")
         # 画像をメモリに保存
         buf = BytesIO()
@@ -195,13 +204,19 @@ class TRADE:
                 )
             )
 
-        # ===== ログ保存処理 =====
-        log_dir = Path("transaction_logs")
-        log_dir.mkdir(exist_ok=True)
+        # ===== ログ保存処理（日付フォルダ分割） =====
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
 
-        nowt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = log_dir / f"{nowt}.txt"
+        # 日付ディレクトリ作成
+        log_dir = Path("transaction_logs") / date_str
+        log_dir.mkdir(parents=True, exist_ok=True)
 
+        # ファイルパス生成
+        log_path = log_dir / f"{time_str}.txt"
+
+        # 保存
         with open(log_path, "w", encoding="utf-8") as f:
             if isinstance(resp, (dict, list)):
                 json.dump(resp, f, ensure_ascii=False, indent=2)

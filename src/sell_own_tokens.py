@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 def main():
@@ -61,13 +62,19 @@ def main():
         print(llm_opinion)
         full_log += f"==STEP 2==\n{prompt}\n\n{llm_opinion}\n\n"
 
-        # full_logを保存
-        log_dir = Path("full_logs")
-        log_dir.mkdir(exist_ok=True)
+        # ===== full_log 保存（日付フォルダ分割） =====
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
 
-        nowt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = log_dir / f"{nowt}_{stat['condition_id']}.txt"
+        # 日付ディレクトリ作成
+        log_dir = Path("full_logs") / date_str
+        log_dir.mkdir(parents=True, exist_ok=True)
 
+        # ファイルパス生成
+        log_path = log_dir / f"{time_str}_{stat['condition_id']}.txt"
+
+        # 保存
         with open(log_path, "w", encoding="utf-8") as f:
             f.write(str(full_log))
 
