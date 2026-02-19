@@ -11,13 +11,13 @@ from zoneinfo import ZoneInfo
 def main():
     tr = TRADE()
     ag = Agent()
-    full_log = ""
     now_date = datetime.now().strftime("%Y/%m/%d")
     ## STEP 1: 現在の購入済トークンの状態を確認
     self_status = tr.get_self_status()
-    full_log += f"==STEP 1==\n{self_status}\n\n"
 
     for stat in self_status:
+        full_log = ""
+        full_log += f"==STEP 1==\n{stat}\n\n"
         ## STEP 2: トークン一つ一つについて、現在の情報を取得
         market_detail, token_info, img_base64 = tr.get_market_detail(market_id="", condition_id=stat['condition_id'])
         if int(stat['status']) == 0:
