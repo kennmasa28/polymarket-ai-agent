@@ -213,6 +213,10 @@ class Agent(object):
 
         conversation = [
             {
+                "role": "system",
+                "content": "Web検索は最大1回のみ実行してください。追加検索は禁止です。"
+            },
+            {
                 "role": "user",
                 "content": contents,
             }
