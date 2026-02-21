@@ -58,7 +58,7 @@ class App(object):
                 img_logs_dict = {}
 
                 # 日付フォルダ内のjsonファイルを走査
-                for json_file in date_dir.glob("*.txt"):
+                for json_file in date_dir.glob("*.json"):
                     try:
                         with open(json_file, "r", encoding="utf-8") as f:
                             data = f.read()
@@ -68,17 +68,17 @@ class App(object):
                     except Exception as e:
                         print(f"Error reading {json_file}: {e}")
         
-        for date_dir in self.imglog_path.iterdir():
-            if date_dir.is_dir():
-                date_key = date_dir.name
-                img_logs_dict[date_key] = {}
+        # for date_dir in self.imglog_path.iterdir():
+        #     if date_dir.is_dir():
+        #         date_key = date_dir.name
+        #         img_logs_dict[date_key] = {}
 
-                # 日付フォルダ内のjsonファイルを走査
-                for json_file in date_dir.glob("*.png"):
-                    try:
-                        img_logs_dict[date_key][json_file.name] =f"{json_file}"
-                    except Exception as e:
-                        print(f"Error reading {json_file}: {e}")
+        #         # 日付フォルダ内のjsonファイルを走査
+        #         for json_file in date_dir.glob("*.png"):
+        #             try:
+        #                 img_logs_dict[date_key][json_file.name] =f"{json_file}"
+        #             except Exception as e:
+        #                 print(f"Error reading {json_file}: {e}")
 
         return logs_dict, full_logs_dict, img_logs_dict
         
@@ -87,54 +87,75 @@ class App(object):
         with st.sidebar:
             # ページのタイトルを設定
             st.latex(r"\rm{\large{PolyViewer}}")
+            self.mode = st.radio("ログ閲覧モード", options=["openai_log", "full_log"])
             datelist = self.openai_logs.keys()
             date = st.selectbox("date", options=datelist)
-            datalist = self.openai_logs[date].keys()
-            logdata = []
-            for data in datalist:
-                content = self.openai_logs[date][data]
-                if "arguments" in content["output"][-1].keys():
-                    output = content["output"][-1]["arguments"]
-                    fee_tool = 0
+
+            if self.mode == "openai_log":
+                datalist = self.openai_logs[date].keys()
+                logdata = []
+                for data in datalist:
+                    content = self.openai_logs[date][data]
+                    if "arguments" in content["output"][-1].keys():
+                        output = content["output"][-1]["arguments"]
+                        fee_tool = 0
+                    else:
+                        output = content["output"][-1]["content"][-1]["text"]
+                        fee_tool = 10/1000
+                    logdata.append({
+                        "date": date,
+                        "time": data,
+                        "model": content["model"],
+                        "output": output,
+                        "total_tokens": content["usage"]["total_tokens"],
+                        "fee": content["usage"]["input_tokens"] * 0.25/1e6 + content["usage"]["output_tokens"] * 2.0/1e6 + fee_tool
+                    })
+                self.logdata_df = pd.DataFrame(logdata)
+            else:
+                fdatalist = self.full_logs[date].keys()
+                data = st.selectbox("データ", options=fdatalist)
+                if data in self.full_logs[date]:
+                    self.flogdata = {
+                        "path": data,
+                        "content": json.loads(self.full_logs[date][data])
+                        }
                 else:
-                    output = content["output"][-1]["content"][-1]["text"]
-                    fee_tool = 10/1000
-                logdata.append({
-                    "date": date,
-                    "time": data,
-                    "model": content["model"],
-                    "output": output,
-                    "total_tokens": content["usage"]["total_tokens"],
-                    "fee": content["usage"]["input_tokens"] * 0.25/1e6 + content["usage"]["output_tokens"] * 2.0/1e6 + fee_tool
-                })
-            self.logdata_df = pd.DataFrame(logdata)
-
-            fdatalist = self.full_logs[date].keys()
-            flogdata = []
-            for data in fdatalist:
-                content = self.full_logs[date][data]
-                flogdata.append({
-                    "date": date,
-                    "time": data,
-                    "content": content
-                })
-            self.flogdata_df = pd.DataFrame(flogdata)
-
-            idatalist = self.img_logs[date].keys()
-            self.img_logdata = []
-            for data in idatalist:
-                content = self.img_logs[date][data]
-                self.img_logdata.append(content)
-            
+                    self.flogdata = None
 
 
     def build(self):
         self.define_sidebar()
         if st.button("表示"):
-            st.dataframe(self.logdata_df)
-            st.dataframe(self.flogdata_df)
-            for img in self.img_logdata:
-                st.image(img)
+            if self.mode=="openai_log":
+                st.dataframe(self.logdata_df)
+            else:
+                if self.flogdata == None:
+                    return
+                if "0x" in self.flogdata["path"]:
+                    if "STEP5" in self.flogdata["content"]:
+                        title = "トークンの維持"
+                    else:
+                        if self.flogdata["content"]["STEP5"]["result"] == "成功":
+                            title = "トークンの売却"
+                        else:
+                            title = "トークンの売却失敗"
+                    st.title(f"{title}")
+                    if self.flogdata["content"]["STEP3"] is not None:
+                        st.image(self.flogdata["content"]["STEP3"])
+                    st.write(self.flogdata["content"])
+                else:
+                    if self.flogdata["content"]["STEP5"]["result"] == "成功":
+                        title = "トークンの購入"
+                        st.subheader(f'{self.flogdata["content"]["STEP5"]["token"]}を価格{self.flogdata["content"]["STEP5"]["token_price"]}で{self.flogdata["content"]["STEP5"]["size"]}個')
+                    else:
+                        title = "トークンの購入失敗"
+                    st.title(f"{title}")
+                    if self.flogdata["content"]["STEP3"] is not None:
+                        st.image(self.flogdata["content"]["STEP3"])
+                    st.write(self.flogdata)
+             
+                            
+
         
     
 

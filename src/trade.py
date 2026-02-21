@@ -55,39 +55,40 @@ class TRADE:
         }
         events = self.get(url, params=params)
         return events
-        
     
-    # def get_event_detail(self, event_id: str):
-    #     url = f"{self.gemma_api_base}/events/{event_id}"
-    #     events = self.get(url)
-    #     lines = []
-    #     lines.append("■ イベント基本情報")
-    #     lines.append(f" id: {events.get('id')}")
-    #     lines.append(f" slug: {events.get('slug')}")
-    #     lines.append(f" タイトル: {events.get('title')}")
-    #     lines.append(f" 詳細: {events.get('description')}")
-    #     lines.append(f" 終了日: {events.get('endDate')}")
-    #     lines.append(f" アクティブか: {events.get('active')}")
+    def get_market_by_conditionid(self, condition_id):
+        url = f"{self.gemma_api_base}/markets"
+        params = {
+            "condition_ids": [condition_id],
+        }
+        markets = self.get(url, params=params)
+        marketdata = []
+        for market in markets:
+            market_id = int(market.get('id'))
+            condition_id = f"{market.get('conditionId')}"
+            question = f"{market.get('question')}"
+            detail = market.get('description')
+            tokenname = market.get('outcomes')
+            tokenprice = market.get('outcomePrices')
+            token_ids = market.get('clobTokenIds')
+            enddate = f"{market.get('endDate')}"
+            tokenname = json.loads(tokenname)
+            tokenprice = json.loads(tokenprice)
+            tokenprice = [float(p) for p in tokenprice]   
+            token_ids = json.loads(token_ids)
+            marketdata.append({
+                "market_id": market_id,
+                "condition_id": condition_id,
+                "question": question,
+                "description": detail,
+                "token_name": tokenname,
+                "token_price": tokenprice,
+                "token_ids": token_ids,
+                "end_date": enddate
+            })
+        
+        return json.dumps(marketdata, ensure_ascii=False, indent=2)
 
-    #     if 'liquidity' in events:
-    #         lines.append(f" 流動性: {events['liquidity']}")
-    #     if 'volume' in events:
-    #         lines.append(f" 掛金総額: {events['volume']}")
-
-    #     markets = events.get("markets", [])
-    #     lines.append(f" マーケットの数: {len(markets)}")
-
-    #     for market in markets:
-    #         lines.append(f"■ マーケットID: {market.get('id')}")
-    #         lines.append(f" conditionId: {market.get('conditionId')}")
-    #         lines.append(f" question: {market.get('question')}")
-    #         if 'volume' in market:
-    #             lines.append(f" 掛金総額: {market['volume']}")
-    #         lines.append(f" トークン名: {market.get('outcomes')}")
-    #         lines.append(f" 価格: {market.get('outcomePrices')}")
-
-    #     summary_text = "\n".join(lines)
-    #     return summary_text
 
     def get_recent_events_and_markets(self, tag_slug=None, volume_min=10000, max_months_ahead=6, max_higher_price=0.90):
         events = self.get_recent_event_list(tag_slug=tag_slug, 
@@ -106,7 +107,7 @@ class TRADE:
                 market_id = int(market.get('id'))
                 condition_id = f"{market.get('conditionId')}"
                 question = f"{market.get('question')}"
-                market_volume = float(event.get('volume', 0))
+                market_volume = float(market.get('volume', 0))
                 tokenname = market.get('outcomes')
                 tokenprice = market.get('outcomePrices')
                 token_ids = market.get('clobTokenIds')
@@ -289,10 +290,7 @@ class TRADE:
 
         for dat in data:
             condition_id = dat['conditionId']
-            if dat['size'] * dat['avgPrice'] > dat['currentValue']:
-                status = 0
-            else:
-                status = 1
+            delta =  dat['currentValue'] - dat['size'] * dat['avgPrice']
             lines = []
             lines.append(f"タイトル: {dat['title']}")
             lines.append(f"あなたの所持トークン: {dat['outcome']}")
@@ -305,11 +303,13 @@ class TRADE:
             summary_text = "\n".join(lines)
             self_status.append({
                 "condition_id": condition_id,
-                "status": status,
+                "delta": delta,
                 "text": summary_text,
-                "token": dat["asset"],
-                "size": dat['size'],
-                "price": dat['currentValue'] / dat['size']
+                "token_name": dat['outcome'],
+                "token_id": dat["asset"],
+                "size": float(dat['size']),
+                "price": float(dat['currentValue'] / dat['size']),
+                "avr_price": float(dat['avgPrice'])
             })
         return self_status
 
@@ -320,7 +320,7 @@ if __name__=='__main__':
     # print(t.get_event_detail(156613))
     # print(t.get_market_detail(1345937))
     # id = t.get_self_status()
-    #print(id)
+    print(id)
 
 
 

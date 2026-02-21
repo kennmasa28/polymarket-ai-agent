@@ -47,6 +47,8 @@ def main(tag):
     now_date = datetime.now().strftime("%Y/%m/%d")
     ## STEP 1: イベント・マーケットのリストを収集する。
     events_data = tr.get_recent_events_and_markets(tag_slug=tag, max_higher_price=config.MAX_HIGHER_PRICE)
+    if events_data == []:
+        events_data = tr.get_recent_events_and_markets(tag_slug=None, max_higher_price=config.MAX_HIGHER_PRICE)
     full_log["STEP1"] = f"{events_data}"
 
     ## STEP 2: 詳細検討するマーケットを一つ選ぶ
