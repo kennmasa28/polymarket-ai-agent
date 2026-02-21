@@ -20,30 +20,14 @@ class Agent(object):
         self.tools = [
             {
                 "type": "function",
-                "name": "show_event_detail",
-                "description": "与えられたイベントidの詳細を表示する。イベントidは候補から選ぶ。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "event_id": {
-                            "type": "string",
-                            "description": "イベントの識別子（候補のいずれか）"
-                        }
-                    },
-                    "required": ["event_id"],
-                    "additionalProperties": False
-                }
-            },
-            {
-                "type": "function",
                 "name": "show_market_detail",
                 "description": "与えられたマーケットidの詳細を表示する。market_idは候補から選ぶ。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "market_id": {
-                            "type": "string",
-                            "description": "マーケットの識別子（候補のいずれか）"
+                            "type": "integer",
+                            "description": "マーケットの識別子（整数）"
                         }
                     },
                     "required": ["market_id"],
@@ -134,37 +118,6 @@ class Agent(object):
                 return {}
         # 既に dict ならそのまま
         return args or {}
-    
-    def call_tool_to_show_detail_event(self, prompt):
-        """
-        イベントの詳細を取得する
-        """
-        conversation = [
-            {
-                "role": "user",
-                "content": [{"type": "input_text", "text": prompt}],
-            }
-        ]
-        response = self.openai_client.responses.create(
-            model=self.model,
-            input=conversation,
-            tools=self.tools,
-            tool_choice={"type": "function", "name": "show_event_detail"},
-            reasoning={"effort": "low"},
-        )
-
-        calls = self._extract_function_calls(response)
-
-        if calls:
-            call = calls[0]
-            func = self._get_call_name(call)
-            arguments = self._get_call_arguments(call)
-
-            event_id = arguments.get("event_id")
-
-        # ログ保存
-        self._save_openai_response_json(response)
-        return event_id
     
     def call_tool_to_show_detail_market(self, prompt):
         """

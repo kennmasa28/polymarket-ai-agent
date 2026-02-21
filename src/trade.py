@@ -6,7 +6,8 @@ import config
 import json
 from pathlib import Path
 from matplotlib import pyplot as plt
-from datetime import datetime
+from datetime import datetime, timezone
+from dateutil.relativedelta import relativedelta
 import matplotlib.dates as mdates
 import base64
 from io import BytesIO
@@ -37,7 +38,9 @@ class TRADE:
         r.raise_for_status()
         return r.json()
 
-    def get_recent_event_list(self, limit: int = 20, tag_slug=None, volume_min: int = 10000):
+    def get_recent_event_list(self, limit: int = 20, tag_slug=None, volume_min: int = 10000, max_months_ahead: int = 6):
+        now = datetime.now(timezone.utc)
+        some_months_later = (now + relativedelta(months=max_months_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ")
         url = f"{self.gemma_api_base}/events"
         params = {
             "closed": "false",
@@ -47,74 +50,125 @@ class TRADE:
             "tag_slug": tag_slug,
             "order": "volume24hr",
             "volume_min": volume_min,
+            "end_date_max": some_months_later,
             "ascending": "false",
         }
         events = self.get(url, params=params)
-        lines = []
-        for event in events:
-            lines.append(f"■ イベントid: {event['id']}")
-            lines.append(f" タイトル: {event['title']}")
-            lines.append(f"------------")
-        summary_text = "\n".join(lines)
-        return summary_text
+        return events
         
     
-    def get_event_detail(self, event_id: str):
-        url = f"{self.gemma_api_base}/events/{event_id}"
-        events = self.get(url)
-        lines = []
-        lines.append("■ イベント基本情報")
-        lines.append(f" id: {events.get('id')}")
-        lines.append(f" slug: {events.get('slug')}")
-        lines.append(f" タイトル: {events.get('title')}")
-        lines.append(f" 詳細: {events.get('description')}")
-        lines.append(f" 終了日: {events.get('endDate')}")
-        lines.append(f" アクティブか: {events.get('active')}")
+    # def get_event_detail(self, event_id: str):
+    #     url = f"{self.gemma_api_base}/events/{event_id}"
+    #     events = self.get(url)
+    #     lines = []
+    #     lines.append("■ イベント基本情報")
+    #     lines.append(f" id: {events.get('id')}")
+    #     lines.append(f" slug: {events.get('slug')}")
+    #     lines.append(f" タイトル: {events.get('title')}")
+    #     lines.append(f" 詳細: {events.get('description')}")
+    #     lines.append(f" 終了日: {events.get('endDate')}")
+    #     lines.append(f" アクティブか: {events.get('active')}")
 
-        if 'liquidity' in events:
-            lines.append(f" 流動性: {events['liquidity']}")
-        if 'volume' in events:
-            lines.append(f" 掛金総額: {events['volume']}")
+    #     if 'liquidity' in events:
+    #         lines.append(f" 流動性: {events['liquidity']}")
+    #     if 'volume' in events:
+    #         lines.append(f" 掛金総額: {events['volume']}")
 
-        markets = events.get("markets", [])
-        lines.append(f" マーケットの数: {len(markets)}")
+    #     markets = events.get("markets", [])
+    #     lines.append(f" マーケットの数: {len(markets)}")
 
-        for market in markets:
-            lines.append(f"■ マーケットID: {market.get('id')}")
-            lines.append(f" conditionId: {market.get('conditionId')}")
-            lines.append(f" question: {market.get('question')}")
-            if 'volume' in market:
-                lines.append(f" 掛金総額: {market['volume']}")
-            lines.append(f" トークン名: {market.get('outcomes')}")
-            lines.append(f" 価格: {market.get('outcomePrices')}")
+    #     for market in markets:
+    #         lines.append(f"■ マーケットID: {market.get('id')}")
+    #         lines.append(f" conditionId: {market.get('conditionId')}")
+    #         lines.append(f" question: {market.get('question')}")
+    #         if 'volume' in market:
+    #             lines.append(f" 掛金総額: {market['volume']}")
+    #         lines.append(f" トークン名: {market.get('outcomes')}")
+    #         lines.append(f" 価格: {market.get('outcomePrices')}")
 
-        summary_text = "\n".join(lines)
-        return summary_text
+    #     summary_text = "\n".join(lines)
+    #     return summary_text
+
+    def get_recent_events_and_markets(self, tag_slug=None, volume_min=10000, max_months_ahead=6, max_higher_price=0.90):
+        events = self.get_recent_event_list(tag_slug=tag_slug, 
+                                            volume_min = volume_min, 
+                                            max_months_ahead=max_months_ahead)
+        eventdata = []
+        for event in events:
+            event_id = int(event.get('id'))
+            title = f"{event.get('title')}"
+            detail = f" {event.get('description')}"
+            liquidity = float(event.get('liquidity', 0))
+            volume = float(event.get('volume', 0))
+            markets = event.get("markets", [])
+            marketdata = []
+            for market in markets:
+                market_id = int(market.get('id'))
+                condition_id = f"{market.get('conditionId')}"
+                question = f"{market.get('question')}"
+                market_volume = float(event.get('volume', 0))
+                tokenname = market.get('outcomes')
+                tokenprice = market.get('outcomePrices')
+                token_ids = market.get('clobTokenIds')
+                enddate = f"{market.get('endDate')}"
+                """
+                Yes, No以外のトークンがあるものは除去
+                高い方の勝率がmax_higher_price以上のものは除去
+                """
+                if tokenname is not None:
+                    tokenname = json.loads(tokenname)
+                    if 'Yes' not in tokenname[0]:
+                        continue
+                else:
+                    continue
+                if tokenprice is not None:
+                    tokenprice = json.loads(tokenprice)
+                    tokenprice = [float(p) for p in tokenprice]
+                    if max(tokenprice) > max_higher_price:
+                        continue
+                else:
+                    continue
+                if token_ids is not None:
+                    token_ids = json.loads(token_ids)
+                else:
+                    continue
+
+                marketdata.append({
+                    "market_id": market_id,
+                    "condition_id": condition_id,
+                    "question": question,
+                    "volume": market_volume,
+                    "token_name": tokenname,
+                    "token_price": tokenprice,
+                    "token_ids": token_ids,
+                    "end_date": enddate
+                })
+            if len(marketdata) == 0:
+                continue
+            eventdata.append({
+                "event_id": event_id,
+                "title": title,
+                "description": detail.strip(),
+                "liquidity": liquidity,
+                "volume": volume,
+                "markets": marketdata
+            })
+
+        return json.dumps(eventdata, ensure_ascii=False, indent=2)
     
-    def get_market_detail(self, market_id: str, condition_id: str=""):
+    def get_market_history_img(self, market_id: str, condition_id: str=""):
         if condition_id == "":
             url = f"{self.gemma_api_base}/markets/{market_id}"
             market = self.get(url)
         else:
             url = f"{self.gemma_api_base}/markets?condition_ids={condition_id}"
             market = self.get(url)[0]
-        lines = []
-        lines.append(f"■ マーケットID: {market.get('id')}")
-        lines.append(f" conditionId: {market.get('conditionId')}")
-        lines.append(f" question: {market.get('question')}")
-        if 'volume' in market:
-            lines.append(f" 掛金総額: {market['volume']}")
-        lines.append(f" トークン名: {market.get('outcomes')}")
-        lines.append(f" 価格: {market.get('outcomePrices')}")
-        lines.append(f" 終了日: {market.get('endDate')}")
-        summary_text = "\n".join(lines)
         token_info = []
         token_name = json.loads(market.get('outcomes'))
         token_id = json.loads(market.get('clobTokenIds'))
         token_price = json.loads(market.get('outcomePrices'))
-        timeseries = {}
         """
-        トークン情報を取得
+        トークンの価格履歴を図示
         """
         ts = {}
         plt.figure()
@@ -166,7 +220,7 @@ class TRADE:
         # base64 エンコード
         img_base64 = base64.b64encode(buf.read()).decode("utf-8")
         
-        return summary_text, token_info, img_base64
+        return img_path, img_base64
     
     def make_book_order(self, token_id: str, price: float, size: int, side: str):
         signer = Account.from_key(self.private_key).address
