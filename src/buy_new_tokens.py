@@ -49,7 +49,7 @@ def main(tag):
     events_data = tr.get_recent_events_and_markets(tag_slug=tag, max_higher_price=config.MAX_HIGHER_PRICE)
     if events_data == []:
         events_data = tr.get_recent_events_and_markets(tag_slug=None, max_higher_price=config.MAX_HIGHER_PRICE)
-    full_log["STEP1"] = f"{events_data}"
+    full_log["STEP1"] = f"{tag}"
 
     ## STEP 2: 詳細検討するマーケットを一つ選ぶ
     lines = []
@@ -127,8 +127,7 @@ def main(tag):
         {event_and_market_detail_text}
     """
 
-    # llm_opinion = ag.get_LLM_opiniton(prompt=prompt, image_base64=img_base64)
-    llm_opinion = "なし"
+    llm_opinion = ag.get_LLM_opiniton(prompt=prompt, image_base64=img_base64)
     full_log["STEP4"] = {}
     full_log["STEP4"]["prompt"] = prompt
     full_log["STEP4"]["response"] = llm_opinion
