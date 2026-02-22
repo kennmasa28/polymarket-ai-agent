@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 def summarize_event_and_market(marketdata):
     try:
+        marketdata = json.loads(marketdata)[0]
+        print(marketdata)
         lines = []
         token_info = []
         lines.append(f"予測テーマ: {marketdata['question']}")
