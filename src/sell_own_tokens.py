@@ -133,7 +133,6 @@ def main():
             token_id = stat['token_id']
             price = float(stat["price"]) * config.SELL_BUFFER_RATE
             full_log["STEP5"] = {}
-            full_log["STEP5"]["prompt"] = prompt
             full_log["STEP5"]["token"] = token
             full_log["STEP5"]["token_id"] = token_id
             full_log["STEP5"]["size"] = size

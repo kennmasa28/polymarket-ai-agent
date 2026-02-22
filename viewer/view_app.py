@@ -87,7 +87,7 @@ class App(object):
         with st.sidebar:
             # ページのタイトルを設定
             st.latex(r"\rm{\large{PolyViewer}}")
-            self.mode = st.radio("ログ閲覧モード", options=["openai_log", "full_log"])
+            self.mode = st.radio("ログ閲覧モード", options=["openai_log", "full_log", "performance"])
             datelist = self.openai_logs.keys()
             date = st.selectbox("date", options=datelist)
 
@@ -111,7 +111,7 @@ class App(object):
                         "fee": content["usage"]["input_tokens"] * 0.25/1e6 + content["usage"]["output_tokens"] * 2.0/1e6 + fee_tool
                     })
                 self.logdata_df = pd.DataFrame(logdata)
-            else:
+            elif self.mode=="full_log":
                 fdatalist = self.full_logs[date].keys()
                 data = st.selectbox("データ", options=fdatalist)
                 if data in self.full_logs[date]:
@@ -121,6 +121,8 @@ class App(object):
                         }
                 else:
                     self.flogdata = None
+            else:
+                st.write("coming soon")
 
 
     def build(self):
@@ -128,7 +130,7 @@ class App(object):
         if st.button("表示"):
             if self.mode=="openai_log":
                 st.dataframe(self.logdata_df)
-            else:
+            elif self.mode=="full_log":
                 if self.flogdata == None:
                     return
                 if "0x" in self.flogdata["path"]:
@@ -153,12 +155,6 @@ class App(object):
                     if self.flogdata["content"]["STEP3"] is not None:
                         st.image(self.flogdata["content"]["STEP3"])
                     st.write(self.flogdata)
-             
-                            
-
-        
-    
-
 
 if __name__ == "__main__":
     app = App()
