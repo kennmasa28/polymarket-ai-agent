@@ -88,7 +88,7 @@ class App(object):
             # ページのタイトルを設定
             st.latex(r"\rm{\large{PolyViewer}}")
             self.mode = st.radio("ログ閲覧モード", options=["openai_log", "full_log", "performance"])
-            datelist = self.openai_logs.keys()
+            datelist = sorted(self.openai_logs.keys(), reverse=True)
             date = st.selectbox("date", options=datelist)
 
             if self.mode == "openai_log":
