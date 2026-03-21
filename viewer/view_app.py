@@ -133,7 +133,9 @@ class App(object):
             elif self.mode=="full_log":
                 if self.flogdata == None:
                     return
-                if "0x" in self.flogdata["path"]:
+                if "★" in self.flogdata["path"]:
+                    st.write(self.flogdata["content"])
+                elif "0x" in self.flogdata["path"]:
                     if "STEP5" in self.flogdata["content"]:
                         title = "トークンの維持"
                     else:

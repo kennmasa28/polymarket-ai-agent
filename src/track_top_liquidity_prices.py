@@ -226,7 +226,6 @@ class PolymarketPriceTracker:
                 time_str = now.strftime("%H%M%S")
                 log_dir = Path("full_logs") / date_str
                 log_dir.mkdir(parents=True, exist_ok=True)
-                log_path = log_dir / f"{time_str}_★.json"
                 print(snapshot["timestamp"])
                 for market in snapshot["alerts"]:
                     ## STEP 1: 現在の購入済トークンの状態を確認
@@ -239,6 +238,7 @@ class PolymarketPriceTracker:
                             token_id = ti['token_id']
                     price = float(ti["token_price"]) * config.BUY_BUFFER_RATE
                     full_log[market["condition_id"]] = {}
+                    full_log[market["condition_id"]]["question"] = market["question"]
                     full_log[market["condition_id"]]["token"] = token
                     full_log[market["condition_id"]]["token_id"] = token_id
                     full_log[market["condition_id"]]["size"] = size
@@ -249,7 +249,9 @@ class PolymarketPriceTracker:
                         print(f"トークンを価格{price}で、{size}個購入しました。")
                         print(f"Order response saved to: {tlog_path}")
                         full_log[market["condition_id"]]["result"] = "成功"
+                        log_path = log_dir / f"{time_str}_★.json"
                     except:
+                        log_path = log_dir / f"{time_str}_☆.json"
                         print(f"トークンを購入できませんでした。{log_path}を確認してください。")
                         full_log[market["condition_id"]]["result"] = "失敗"
                     
