@@ -3,7 +3,7 @@ from trade import TRADE
 import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from from datetime import datetime, timezone
 from typing import Any
 import requests
 import config
@@ -312,12 +312,3 @@ class PolymarketPriceTracker:
             return float(value)
         except (TypeError, ValueError):
             return 0.0
-
-    @staticmethod
-    def _utc_now() -> str:
-        return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-if __name__ == "__main__":
-    tracker = PolymarketPriceTracker()
-    tracker.poll_forever()

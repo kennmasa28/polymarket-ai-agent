@@ -213,3 +213,4 @@ full_logs/
 
 src/congig.py
 transaction_logs
+*json

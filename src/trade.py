@@ -14,9 +14,18 @@ from io import BytesIO
 import os
 from zoneinfo import ZoneInfo
 from eth_account import Account
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs
-from py_clob_client.order_builder.constants import BUY, SELL
+from py_clob_client_v2 import (
+    ClobClient,
+    OrderArgs,
+    PartialCreateOrderOptions,
+    SignatureTypeV2,
+)
+from py_clob_client_v2.clob_types import ApiCreds
+from py_clob_client_v2.order_builder.constants import BUY, SELL
+from py_clob_client_v2.clob_types import OrderType
+
+CREDS_FILE = Path("api_creds.json")
+SIGNATURE_TYPE = SignatureTypeV2.POLY_GNOSIS_SAFE
 
 class TRADE:
     """
@@ -223,61 +232,60 @@ class TRADE:
         
         return img_path, img_base64
     
+    def _get_api_creds(self):
+        if CREDS_FILE.exists():
+            with open(CREDS_FILE) as f:
+                d = json.load(f)
+            return ApiCreds(
+                api_key=d["api_key"],
+                api_secret=d["api_secret"],
+                api_passphrase=d["api_passphrase"],
+            )
+        # signature_type, funder は指定しない
+        temp = ClobClient(
+            host=self.clob_api_base,
+            chain_id=self.chain_id,
+            key=self.private_key,
+            signature_type=SIGNATURE_TYPE,
+            funder=self.funder,
+        )
+
+        creds = temp.create_or_derive_api_key()
+        with open(CREDS_FILE, "w") as f:
+            json.dump({
+                "api_key": creds.api_key,
+                "api_secret": creds.api_secret,
+                "api_passphrase": creds.api_passphrase,
+            }, f, indent=2)
+        return creds
+
     def make_book_order(self, token_id: str, price: float, size: int, side: str):
-        signer = Account.from_key(self.private_key).address
+        from py_clob_client_v2.order_builder.constants import BUY, SELL
+        from py_clob_client_v2.clob_types import OrderType
 
-        temp_client = ClobClient(self.clob_api_base, 
-                                 key=self.private_key, 
-                                 chain_id=self.chain_id, 
-                                 funder=self.funder, 
-                                 signature_type=2)
-        api_creds = temp_client.create_or_derive_api_creds()
+        # signature_type, funder は指定しない（EOAとして直接取引）
+        client = ClobClient(
+            host=self.clob_api_base,
+            chain_id=self.chain_id,
+            key=self.private_key,
+            creds=self._get_api_creds(),
+            signature_type=SIGNATURE_TYPE,
+            funder=self.funder,
+        )
 
-        client = ClobClient(self.clob_api_base, 
-                            key=self.private_key, 
-                            chain_id=self.chain_id, 
-                            creds=api_creds, 
-                            funder=self.funder, 
-                            signature_type=2)
+        order_side = BUY if side == "B" else SELL
+        resp = client.create_and_post_order(
+            OrderArgs(token_id=token_id, price=price, size=size, side=order_side),
+            options=PartialCreateOrderOptions(tick_size="0.01", neg_risk=False),
+        )
+        print(f"結果: {resp}")
 
-        if side == "B":
-            resp = client.create_and_post_order(
-                OrderArgs(
-                    token_id=token_id,
-                    price=price,
-                    size=size,
-                    side=BUY,
-                )
-            )
-        else:
-            resp = client.create_and_post_order(
-                OrderArgs(
-                    token_id=token_id,
-                    price=price,
-                    size=size,
-                    side=SELL,
-                )
-            )
-
-        # ===== ログ保存処理（日付フォルダ分割） =====
         now = datetime.now(ZoneInfo("Asia/Tokyo"))
-        date_str = now.strftime("%Y%m%d")
-        time_str = now.strftime("%H%M%S")
-
-        # 日付ディレクトリ作成
-        log_dir = Path("transaction_logs") / date_str
+        log_dir = Path("transaction_logs") / now.strftime("%Y%m%d")
         log_dir.mkdir(parents=True, exist_ok=True)
-
-        # ファイルパス生成
-        log_path = log_dir / f"{time_str}.txt"
-
-        # 保存
+        log_path = log_dir / f"{now.strftime('%H%M%S')}.txt"
         with open(log_path, "w", encoding="utf-8") as f:
-            if isinstance(resp, (dict, list)):
-                json.dump(resp, f, ensure_ascii=False, indent=2)
-            else:
-                f.write(str(resp))
-
+            json.dump(resp if isinstance(resp, (dict, list)) else str(resp), f, ensure_ascii=False, indent=2)
         return log_path
     
     def get_self_status(self):
@@ -320,7 +328,8 @@ if __name__=='__main__':
     # print(t.get_event_detail(156613))
     # print(t.get_market_detail(1345937))
     # id = t.get_self_status()
-    print(id)
-
-
-
+    # print(id)
+    res = t.make_book_order(token_id="104709284002113814284527094459750550924724996349053105098692118136695631316738",
+                            price=0.899,
+                            size=5,
+                            side="B")
