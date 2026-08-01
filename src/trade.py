@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 import matplotlib.dates as mdates
 import base64
+from io import BytesIO
 import os
 from zoneinfo import ZoneInfo
 from polymarket import SecureClient
@@ -136,3 +137,71 @@ class TRADE:
             self.save_order_log(order_log, token_id, side)
             
         return response
+
+    def get_market_history_img_by_condition_id(self, condition_id: str=""):
+        # if condition_id == "":
+        #     url = f"{self.gemma_api_base}/markets/{market_id}"
+        #     market = self.get(url)
+        # else:
+        #     url = f"{self.gemma_api_base}/markets?condition_ids={condition_id}"
+        #     market = self.get(url)[0]
+        url = f"{self.gemma_api_base}/markets?condition_ids={condition_id}"
+        market = self.get(url)[0]
+        token_info = []
+        token_name = json.loads(market.get('outcomes'))
+        token_id = json.loads(market.get('clobTokenIds'))
+        token_price = json.loads(market.get('outcomePrices'))
+        """
+        トークンの価格履歴を図示
+        """
+        ts = {}
+        plt.figure()
+        for i in range(len(token_name)):
+            token_info.append({
+                'token_name': token_name[i],
+                'token_id': token_id[i],
+                'token_price': token_price[i]
+            })
+            url = f"{self.clob_api_base}/prices-history"
+            params = {
+                        "market": token_id[i],
+                        "interval": '6h'
+                    }
+            data = self.get(url, params=params)
+            ts['time'] = []
+            ts[token_name[i]] = []
+            for item in data["history"]:
+                ts["time"].append(datetime.utcfromtimestamp(item["t"])) 
+                ts[token_name[i]].append(item["p"])
+            plt.plot(ts['time'], ts[token_name[i]], label=token_name[i])
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+        plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator())
+        plt.xticks(rotation=45)
+        plt.title(f"{market.get('question')}")
+        plt.xlabel('time')
+        plt.ylabel('price of tokens')
+        plt.legend()
+        plt.tight_layout()
+        # 画像を保存（日付フォルダ分割）
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
+
+        # 日付ディレクトリ作成
+        img_dir = Path("img_logs") / date_str
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+        # ファイル名生成
+        img_path = img_dir / f"{time_str}_{condition_id}.png"
+
+        # 保存
+        plt.savefig(img_path, format="png", bbox_inches="tight")
+        # 画像をメモリに保存
+        buf = BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight")
+        plt.close()  # メモリリーク防止
+        buf.seek(0)
+        # base64 エンコード
+        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+        
+        return img_path, img_base64
