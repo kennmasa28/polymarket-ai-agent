@@ -15,6 +15,12 @@ import os
 from zoneinfo import ZoneInfo
 from polymarket import SecureClient
 
+
+# Keep generated files in the repository, regardless of the working directory
+# from which Python was launched.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 class TRADE:
     """
     共通のAPI基盤（HTTPクライアント + 設定）
@@ -38,6 +44,94 @@ class TRADE:
         r = self.session.get(url, params=params, timeout=30)
         r.raise_for_status()
         return r.json()
+
+    def get_recent_event_list(self, limit: int = 20, tag_slug=None, volume_min: int = 10000, max_months_ahead: int = 6) -> list[dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        some_months_later = (now + relativedelta(months=max_months_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        url = f"{self.gemma_api_base}/events"
+        params = {
+            "closed": "false",
+            "active": "true",
+            "limit": limit,
+            "offset": 0,
+            "tag_slug": tag_slug,
+            "order": "volume24hr",
+            "volume_min": volume_min,
+            "end_date_max": some_months_later,
+            "ascending": "false",
+        }
+        events_raw = self.get(url, params=params)
+        events = []
+        for event in events_raw:
+            description = event.get('description', None)[:100] + "..."
+            events.append({
+                'event_id': event.get('id', None),
+                'title': event.get('title', None),
+                'description': description,
+                # 'markets': markets,  
+            })
+        return events
+
+    def get_particular_event_by_id(self, event_id: int) -> list[dict[str, Any]]:
+            url = f"{self.gemma_api_base}/events/{event_id}"
+            params = {
+                "closed": "false",
+                "active": "true",
+                "ascending": "false",
+            }
+            event_raw = self.get(url, params=params)
+            event = []
+            markets_raw = event_raw.get('markets', None)
+            markets = []
+            for market in markets_raw:
+                markets.append({
+                    # 'market_id': event_raw.get('id', None),
+                    'conditionId': market.get('conditionId', None),
+                    'question': market.get('question', None),
+                    'resolutionSource': market.get('resolutionSource', None),
+                    'startDate': market.get('startDate', None),
+                    'endDate': market.get('endDate', None),
+                    'liquidity': market.get('liquidity', None),
+                })
+            event.append({
+                'title': event_raw.get('title', None),
+                'description': event_raw.get('description', None),
+                'markets': markets,  
+            })
+            return event
+    
+    def get_market_by_conditionid(self, condition_id: str)-> list[dict[str, Any]]:
+        url = f"{self.gemma_api_base}/markets"
+        params = {
+            "condition_ids": [condition_id],
+        }
+        markets = self.get(url, params=params)
+        marketdata = []
+        for market in markets:
+            # market_id = int(market.get('id'))
+            condition_id = f"{market.get('conditionId')}"
+            question = f"{market.get('question')}"
+            detail = market.get('description')
+            tokenname = market.get('outcomes')
+            tokenprice = market.get('outcomePrices')
+            token_ids = market.get('clobTokenIds')
+            enddate = f"{market.get('endDate')}"
+            tokenname = json.loads(tokenname)
+            tokenprice = json.loads(tokenprice)
+            tokenprice = [float(p) for p in tokenprice]   
+            token_ids = json.loads(token_ids)
+            marketdata.append({
+                # "market_id": market_id,
+                "condition_id": condition_id,
+                "question": question,
+                "description": detail,
+                "token_name": tokenname,
+                "token_price": tokenprice,
+                "token_ids": token_ids,
+                "end_date": enddate
+            })
+        
+        return json.dumps(marketdata, ensure_ascii=False, indent=2)
     
     def get_self_status(self):
         url = f"{self.data_api_base}/positions"
@@ -76,7 +170,7 @@ class TRADE:
         now = datetime.now(ZoneInfo("Asia/Tokyo"))
         date_str = now.strftime("%Y%m%d")
         time_str = now.strftime("%H%M%S")
-        log_dir = Path("../order_logs") / date_str
+        log_dir = PROJECT_ROOT / "order_logs" / date_str
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{time_str}_{side}_{token_id}.json"
         with log_path.open("w", encoding="utf-8") as log_file:
@@ -188,7 +282,7 @@ class TRADE:
         time_str = now.strftime("%H%M%S")
 
         # 日付ディレクトリ作成
-        img_dir = Path("img_logs") / date_str
+        img_dir = PROJECT_ROOT / "img_logs" / date_str
         img_dir.mkdir(parents=True, exist_ok=True)
 
         # ファイル名生成
@@ -205,3 +299,13 @@ class TRADE:
         img_base64 = base64.b64encode(buf.read()).decode("utf-8")
         
         return img_path, img_base64
+
+
+if __name__=='__main__':
+    t = TRADE()
+    # events = t.get_recent_event_list(tag_slug="ai")
+    # events = t.get_particular_event_by_id(event_id=995960)
+    # print(events)
+    # print(len(str(events)))
+    # print(t.get_market_by_conditionid("0x2ec05aa8f56adfd1470d14ded3438272ddebb45b0f539d691215c1605cd680ca"))
+    t.get_market_history_img_by_condition_id("0x2ec05aa8f56adfd1470d14ded3438272ddebb45b0f539d691215c1605cd680ca")

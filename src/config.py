@@ -24,4 +24,4 @@ CONSECUTIVE_DECREASE_THRESHOLD = 0.07
 
 ## OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MODEL = "gpt-5.4-mini"
+MODEL = "gpt-5.6-luna"

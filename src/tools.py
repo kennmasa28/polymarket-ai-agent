@@ -26,6 +26,53 @@ def get_portfolio_status() -> str:
 
 
 @function_tool
+def get_recent_event_list(
+    limit: int = 20,
+    tag_slug: str | None = None,
+    volume_min: int = 10000,
+    max_months_ahead: int = 6,
+) -> str:
+    """Get active Polymarket events, ordered by 24-hour trading volume.
+
+    Args:
+        limit: Maximum number of events to return.
+        tag_slug: Optional event-category tag slug, such as ``ai``.
+        volume_min: Minimum 24-hour volume for returned events.
+        max_months_ahead: Include events ending no later than this many months ahead.
+    """
+    return _serialise_result(
+        TRADE().get_recent_event_list(
+            limit=limit,
+            tag_slug=tag_slug,
+            volume_min=volume_min,
+            max_months_ahead=max_months_ahead,
+        )
+    )
+
+
+@function_tool
+def get_particular_event_by_id(event_id: int) -> str:
+    """Get an event and the markets belonging to it.
+
+    Args:
+        event_id: Polymarket event ID obtained from ``get_recent_event_list``.
+    """
+    return _serialise_result(TRADE().get_particular_event_by_id(event_id))
+
+
+@function_tool
+def get_market_by_conditionid(condition_id: str) -> str:
+    """Get a market's question, outcomes, prices, and outcome token IDs.
+
+    Args:
+        condition_id: Polymarket condition ID obtained from event market data.
+    """
+    if not condition_id.strip():
+        raise ValueError("condition_id must not be empty")
+    return TRADE().get_market_by_conditionid(condition_id)
+
+
+@function_tool
 def get_market_history_image(condition_id: str) -> ToolOutputImage:
     """Return a market's outcome-token price history as a PNG chart.
 
@@ -72,4 +119,12 @@ def sell_token(token_id: str, shares: int) -> str:
     return _serialise_result(TRADE().make_sell_order(token_id, shares, "SELL"))
 
 
-TRADING_TOOLS = [get_portfolio_status, get_market_history_image, buy_token, sell_token]
+TRADING_TOOLS = [
+    get_portfolio_status,
+    get_recent_event_list,
+    get_particular_event_by_id,
+    get_market_by_conditionid,
+    get_market_history_image,
+    buy_token,
+    sell_token,
+]
