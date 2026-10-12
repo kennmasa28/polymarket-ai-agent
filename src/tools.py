@@ -7,6 +7,7 @@ from typing import Any
 
 from agents import ToolOutputImage, function_tool
 
+from agent_logger import tool_failure_handler
 from trade import TRADE
 
 
@@ -15,7 +16,7 @@ def _serialise_result(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def get_portfolio_status() -> str:
     """Get the connected Polymarket account's current token positions.
 
@@ -25,7 +26,7 @@ def get_portfolio_status() -> str:
     return _serialise_result(TRADE().get_self_status())
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def get_recent_event_list(
     limit: int = 20,
     tag_slug: str | None = None,
@@ -50,7 +51,7 @@ def get_recent_event_list(
     )
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def get_particular_event_by_id(event_id: int) -> str:
     """Get an event and the markets belonging to it.
 
@@ -60,7 +61,7 @@ def get_particular_event_by_id(event_id: int) -> str:
     return _serialise_result(TRADE().get_particular_event_by_id(event_id))
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def get_market_by_conditionid(condition_id: str) -> str:
     """Get a market's question, outcomes, prices, and outcome token IDs.
 
@@ -72,7 +73,7 @@ def get_market_by_conditionid(condition_id: str) -> str:
     return TRADE().get_market_by_conditionid(condition_id)
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def get_market_history_image(condition_id: str) -> ToolOutputImage:
     """Return a market's outcome-token price history as a PNG chart.
 
@@ -89,7 +90,7 @@ def get_market_history_image(condition_id: str) -> ToolOutputImage:
     return ToolOutputImage(image_url=f"data:image/png;base64,{image_base64}")
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def buy_token(token_id: str, amount_usd: int) -> str:
     """Place a live market BUY order for a Polymarket outcome token.
 
@@ -104,7 +105,7 @@ def buy_token(token_id: str, amount_usd: int) -> str:
     return _serialise_result(TRADE().make_buy_order(token_id, amount_usd, "BUY"))
 
 
-@function_tool
+@function_tool(failure_error_function=tool_failure_handler)
 def sell_token(token_id: str, shares: int) -> str:
     """Place a live market SELL order for a Polymarket outcome token.
 

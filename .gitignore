@@ -211,6 +211,7 @@ openai_logs/
 img_logs/
 full_logs/
 order_logs/
+agent_logs/
 
 src/congig.py
 transaction_logs

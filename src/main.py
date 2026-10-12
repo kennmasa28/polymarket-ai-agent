@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 
-from agents import Agent, Runner, SQLiteSession
+from agents import Agent, ModelSettings, Runner, SQLiteSession
+from openai.types.shared import Reasoning
 
 import config
+from agent_logger import AgentLogger
 from slills_loader import skills_as_instructions
 from tools import TRADING_TOOLS
 
@@ -30,6 +32,10 @@ def create_agent() -> Agent:
         model=config.MODEL,
         instructions=instructions,
         tools=TRADING_TOOLS,
+        # Request reasoning summaries so that the model's reasoning is logged.
+        model_settings=ModelSettings(
+            reasoning=Reasoning(effort=config.REASONING_EFFORT, summary=config.REASONING_SUMMARY)
+        ),
     )
 
 
@@ -39,26 +45,35 @@ def main() -> None:
 
     agent = create_agent()
     session = SQLiteSession("polymarket-trading-chat")
+    logger = AgentLogger()
+    logger.log_session_start(agent)
+    print(f"ログ: {logger.path}")
     print("Polymarket trading agent. 終了するには exit または quit を入力してください。")
 
-    while True:
-        try:
-            message = input("\nYou> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n終了します。")
-            return
+    try:
+        while True:
+            try:
+                message = input("\nYou> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n終了します。")
+                return
 
-        if message.lower() in {"exit", "quit"}:
-            print("終了します。")
-            return
-        if not message:
-            continue
+            if message.lower() in {"exit", "quit"}:
+                print("終了します。")
+                return
+            if not message:
+                continue
 
-        try:
-            result = Runner.run_sync(agent, message, session=session)
-            print(f"\nAgent> {result.final_output}")
-        except Exception as exc:
-            print(f"\nエラー: {exc}")
+            logger.log_user_message(message)
+            try:
+                result = Runner.run_sync(agent, message, session=session, hooks=logger)
+                logger.log_final_output(result.final_output, result.context_wrapper.usage)
+                print(f"\nAgent> {result.final_output}")
+            except Exception as exc:
+                logger.log_run_error(exc)
+                print(f"\nエラー: {exc}")
+    finally:
+        logger.log_session_end()
 
 
 if __name__ == "__main__":
