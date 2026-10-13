@@ -7,8 +7,11 @@ Logs are written by ``src/agent_logger.py`` to ``agent_logs/<date>/<session>.jso
 from __future__ import annotations
 
 import html
+import inspect
 import json
 import re
+from datetime import timedelta
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +19,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from log_store import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from log_store import (  # noqa: E402
     DEFAULT_LOG_DIR,
     DEFAULT_PRICES,
     Session,
@@ -30,6 +35,10 @@ from log_store import (
 )
 
 st.set_page_config(page_title="PolyViewer", page_icon="🛰️", layout="wide")
+
+# st.altair_chart gained ``width`` (and deprecated ``use_container_width``) after 1.50.
+CHART_KW = ({"width": "stretch"} if "width" in inspect.signature(st.altair_chart).parameters
+            else {"use_container_width": True})
 
 # Colour per element kind; also used by charts so the legend matches the cards.
 COLORS = {
@@ -195,8 +204,12 @@ def sidebar() -> dict[str, Any]:
             st.session_state["mode"] = "🔍 詳細"
             st.session_state["date"] = "すべて"
         mode = st.segmented_control(
-            "表示モード", ["🔍 詳細", "🌐 全体"], key="mode", required=True,
+            "表示モード", ["🔍 詳細", "🌐 全体"], key="mode",
         )
+        # Clicking the selected option deselects it; keep the previous mode then.
+        if mode is None:
+            mode = st.session_state.get("last_mode", "🔍 詳細")
+        st.session_state["last_mode"] = mode
         dates = sorted({p.parent.name for p in files}, reverse=True)
         date = st.selectbox("日付", ["すべて"] + dates, key="date")
         if date != "すべて":
@@ -368,7 +381,7 @@ def render_analysis(session: Session, prices: tuple[float, float, float]) -> Non
                 range=["#3b82f6", "#93c5fd", "#8b5cf6", "#c4b5fd"]), legend=alt.Legend(orient="bottom")),
             tooltip=["id", "種類", alt.Tooltip("tokens:Q", format=","), "tools"],
         ).properties(height=300)
-        st.altair_chart(chart, width="stretch")
+        st.altair_chart(chart, **CHART_KW)
     with right:
         st.markdown("##### 📈 コンテキスト増加とレイテンシ")
         base = alt.Chart(df).encode(x=alt.X("id:N", sort=order, title=None))
@@ -379,7 +392,7 @@ def render_analysis(session: Session, prices: tuple[float, float, float]) -> Non
             y=alt.Y("duration_ms:Q", title="LLM レイテンシ (ms)", axis=alt.Axis(titleColor="#8b5cf6")),
             tooltip=["id", "duration_ms"])
         st.altair_chart(alt.layer(bars, line).resolve_scale(y="independent").properties(height=300),
-                        width="stretch")
+                        **CHART_KW)
 
     st.markdown("##### 🕒 実行タイムライン (Gantt)")
     spans = []
@@ -393,11 +406,11 @@ def render_analysis(session: Session, prices: tuple[float, float, float]) -> Non
                               "kind": "tool error" if c.error else "tool", "label": f"T{c.turn}-S{c.step}",
                               "ms": c.duration_ms})
     if spans:
+        for s in spans:
+            s["start"] = s["start"].replace(tzinfo=None)
+            # Keep very short spans visible.
+            s["end"] = max(s["end"].replace(tzinfo=None), s["start"] + timedelta(milliseconds=150))
         sdf = pd.DataFrame(spans)
-        # Keep very short spans visible.
-        sdf["end"] = sdf.apply(lambda r: max(r["end"], r["start"] + pd.Timedelta(milliseconds=150)), axis=1)
-        sdf["start"] = sdf["start"].map(lambda d: d.replace(tzinfo=None))
-        sdf["end"] = sdf["end"].map(lambda d: d.replace(tzinfo=None))
         gantt = alt.Chart(sdf).mark_bar(cornerRadius=3).encode(
             x=alt.X("start:T", title=None, axis=alt.Axis(format="%H:%M:%S")),
             x2="end:T",
@@ -408,7 +421,7 @@ def render_analysis(session: Session, prices: tuple[float, float, float]) -> Non
             tooltip=["label", "lane", alt.Tooltip("ms:Q", title="ms"),
                      alt.Tooltip("start:T", format="%H:%M:%S.%L")],
         ).properties(height=max(140, 44 * sdf["lane"].nunique())).interactive(bind_y=False)
-        st.altair_chart(gantt, width="stretch")
+        st.altair_chart(gantt, **CHART_KW)
 
     left, right = st.columns([3, 2])
     with left:
@@ -439,7 +452,7 @@ def render_analysis(session: Session, prices: tuple[float, float, float]) -> Non
         st.altair_chart(alt.Chart(cost).mark_bar(color="#f59e0b", cornerRadiusEnd=3).encode(
             x=alt.X("cost:Q", title="USD"), y=alt.Y("turn:N", sort=None, title=None),
             tooltip=["turn", alt.Tooltip("cost:Q", format="$.4f")],
-        ).properties(height=max(160, 40 * len(cost))), width="stretch")
+        ).properties(height=max(160, 40 * len(cost))), **CHART_KW)
 
 
 # --------------------------------------------------------------- session: tools
@@ -452,8 +465,8 @@ def render_tools(session: Session) -> None:
     c1, c2, c3 = st.columns([3, 1.4, 2])
     names = sorted({c.name for c in calls})
     picked = c1.pills("ツール", names, selection_mode="multi", default=names, key="tools-names")
-    status = c2.segmented_control("状態", ["すべて", "ok", "error"], default="すべて", key="tools-status",
-                                  required=True)
+    status = c2.segmented_control("状態", ["すべて", "ok", "error"], default="すべて", key="tools-status")
+    status = status or "すべて"
     query = c3.text_input("引数・返り値を検索", key="tools-q", placeholder="例: 0xabc, token_id ...")
 
     def match(c: ToolCall) -> bool:
@@ -629,7 +642,7 @@ def render_overview(files: list[Path], prices: tuple[float, float, float]) -> No
         st.altair_chart(alt.Chart(daily).mark_bar(color="#f59e0b", cornerRadiusEnd=3, size=28).encode(
             x=alt.X("date:N", title=None, axis=alt.Axis(labelAngle=0)), y=alt.Y("cost:Q", title="USD"),
             tooltip=["date", alt.Tooltip("cost:Q", format="$.4f"), alt.Tooltip("tokens:Q", format=","), "sessions"],
-        ).properties(height=260), width="stretch")
+        ).properties(height=260), **CHART_KW)
     with right:
         st.markdown("##### 🔧 ツール利用回数")
         tdf = pd.DataFrame([{"tool": c.name, "状態": "error" if c.error else "ok"}
@@ -643,7 +656,7 @@ def render_overview(files: list[Path], prices: tuple[float, float, float]) -> No
                                                          range=[COLORS["tool"], COLORS["error"]]),
                                 legend=alt.Legend(orient="bottom")),
                 tooltip=["tool", "状態", "回数"],
-            ).properties(height=max(200, 34 * tdf["tool"].nunique())), width="stretch")
+            ).properties(height=max(200, 34 * tdf["tool"].nunique())), **CHART_KW)
         else:
             st.caption("ツール呼び出しなし")
 
