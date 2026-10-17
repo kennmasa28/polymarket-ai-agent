@@ -219,7 +219,7 @@ def open_in_logview(path: str) -> None:
 # -------------------------------------------------------------------- sidebar
 def sidebar() -> None:
     with st.sidebar:
-        st.markdown("## 🤖 PolyAgent")
+        st.latex(r'''\rm{PolyAgent}''')
         st.button("＋ 新しい会話", on_click=new_conversation, type="primary", width="stretch")
 
         convs = ui_conversations()
@@ -235,7 +235,8 @@ def sidebar() -> None:
                      format_func=lambda p: "🆕 新しい会話" if p == NEW else convs.get(p, p))
 
         st.divider()
-        st.text_input("モデル", value=config.MODEL, key="pa_model")
+        model_list = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
+        st.selectbox("モデル", options=model_list, key="pa_model")
         st.selectbox("reasoning effort", EFFORTS, key="pa_effort")
         st.caption("🛡️ 売買はエージェントが提案した注文を **あなたが承認したときだけ** 実行されます。")
         if not os.getenv("OPENAI_API_KEY"):
@@ -494,7 +495,7 @@ def render_session_panel(session: Session | None) -> None:
 def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     if st.session_state.pop("pa_goto_logview", False):
-        st.switch_page("pages/logview.py")
+        st.switch_page("pages/3_logview.py")
     sidebar()
 
     chat = current_chat()
@@ -511,10 +512,7 @@ def main() -> None:
         st.markdown(f'<div class="pa-hero"><h1>🤖 {html.escape(title)}</h1></div>'
                     f'<div class="pa-sub">model <code>{html.escape(st.session_state.get("pa_model") or config.MODEL)}'
                     f"</code> · Polymarket トレーディングエージェント</div>", unsafe_allow_html=True)
-        if session is None:
-            st.info("👋 何でも聞いてください。例: 「AI関連の注目マーケットを探して」「保有ポジションを確認して」\n\n"
-                    "右側のクイックアクションからも始められます。")
-        else:
+        if session is not None:
             for turn in session.turns:
                 render_turn(turn, session)
         if pending:
