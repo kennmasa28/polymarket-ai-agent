@@ -13,6 +13,9 @@ Event types (``event`` field):
     tool_start     a local tool is invoked with its arguments
     tool_end       the tool's return value (images are saved as PNG files)
     tool_error     the exception raised inside a tool (with traceback)
+    approval_request   a live-order tool call is waiting for the user's approval
+    approval_decision  the user approved / rejected that call
+    session_resume     a past conversation was reopened (e.g. from the UI)
     final_output   the agent's final answer for the turn
     run_error      an exception that aborted the turn
     session_end    the chat session finished
@@ -27,7 +30,7 @@ import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agents import Agent, RunContextWrapper, RunHooks, Tool, ToolOutputImage
 from agents.items import ModelResponse, TResponseInputItem
@@ -124,18 +127,35 @@ def _describe_tool(tool: Tool) -> dict[str, Any]:
 class AgentLogger(RunHooks):
     """Run hooks that append every agent step to a JSONL file."""
 
-    def __init__(self, log_dir: Path | str = DEFAULT_LOG_DIR, session_id: str | None = None):
+    def __init__(
+        self,
+        log_dir: Path | str = DEFAULT_LOG_DIR,
+        session_id: str | None = None,
+        path: Path | str | None = None,
+        listener: Callable[[dict[str, Any]], None] | None = None,
+    ):
+        """Open a new log, or append to ``path`` when resuming a conversation.
+
+        ``listener`` is called with every record as it is written, which lets
+        a UI show the agent's progress live.
+        """
         global _active_logger
 
         started = datetime.now()
-        self.session_id = session_id or f"{started:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
-        self.day_dir = Path(log_dir) / f"{started:%Y-%m-%d}"
+        if path is not None:
+            self.path = Path(path)
+            self.session_id = self.path.stem
+        else:
+            self.session_id = session_id or f"{started:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+            self.path = Path(log_dir) / f"{started:%Y-%m-%d}" / f"{self.session_id}.jsonl"
+        self.day_dir = self.path.parent
         self.image_dir = self.day_dir / "images"
         self.day_dir.mkdir(parents=True, exist_ok=True)
-        self.path = self.day_dir / f"{self.session_id}.jsonl"
+        self.resumed = self.path.exists() and self.path.stat().st_size > 0
         self._file = self.path.open("a", encoding="utf-8")
+        self.listener = listener
 
-        self.turn = 0
+        self.turn = self._last_turn() if self.resumed else 0
         self.step = 0
         self._turn_started = 0.0
         self._llm_started = 0.0
@@ -154,12 +174,34 @@ class AgentLogger(RunHooks):
         }
         self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._file.flush()
+        if self.listener is not None:
+            try:
+                self.listener(record)
+            except Exception:  # a display problem must never break the agent run
+                traceback.print_exc()
+
+    def _last_turn(self) -> int:
+        turn = 0
+        with self.path.open(encoding="utf-8") as f:
+            for line in f:
+                try:
+                    turn = max(turn, int(json.loads(line).get("turn", 0)))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        return turn
 
     # ------------------------------------------------- called from main.py
-    def log_session_start(self, agent: Agent) -> None:
+    def log_session_start(self, agent: Agent, source: str = "cli", title: str | None = None) -> None:
+        """Write the session header, or a ``session_resume`` marker when the
+        log already exists."""
+        if self.resumed:
+            self.write("session_resume", source=source, model=str(agent.model))
+            return
         reasoning = getattr(agent.model_settings, "reasoning", None)
         self.write(
             "session_start",
+            source=source,
+            title=title,
             agent=agent.name,
             model=str(agent.model),
             reasoning=reasoning,
@@ -190,9 +232,20 @@ class AgentLogger(RunHooks):
             duration_ms=self._elapsed_ms(self._turn_started),
         )
 
+    def log_approval_request(self, call_id: str | None, tool: str | None, arguments: Any) -> None:
+        self.write("approval_request", call_id=call_id, tool=tool, arguments=_parse_json(arguments))
+
+    def log_approval_decision(self, call_id: str | None, tool: str | None, approved: bool,
+                              message: str | None = None) -> None:
+        self.write("approval_decision", call_id=call_id, tool=tool, approved=approved, message=message)
+
     def log_session_end(self) -> None:
         self.write("session_end")
-        self._file.close()
+        self.close()
+
+    def close(self) -> None:
+        if not self._file.closed:
+            self._file.close()
 
     # ------------------------------------------------------------ run hooks
     async def on_agent_start(self, context: Any, agent: Agent) -> None:

@@ -78,11 +78,17 @@ class ToolCall:
     image_url: str | None = None
     error: dict[str, Any] | None = None
     reasoning: list[str] = field(default_factory=list)  # reasoning that led to this call
+    approval: str | None = None  # None (not required) / "pending" / "approved" / "rejected"
+    approval_message: str | None = None
 
     @property
     def status(self) -> str:
         if self.error:
             return "error"
+        if self.approval == "rejected":
+            return "rejected"
+        if self.approval == "pending":
+            return "awaiting"
         if self.end_ts is None:
             return "running"
         return "ok"
@@ -137,7 +143,7 @@ class Turn:
         if self.error:
             return "error"
         if self.final_output is None:
-            return "running"
+            return "awaiting" if any(c.status == "awaiting" for c in self.tools) else "running"
         return "ok"
 
 
@@ -220,6 +226,16 @@ def build_session(path: Path | str, events: list[dict[str, Any]] | None = None) 
             session.meta = ev
         elif kind == "session_end":
             session.ended = True
+        elif kind == "session_resume":
+            session.ended = False
+        elif kind == "approval_request":
+            c = get_call(ev)
+            c.arguments = ev.get("arguments")
+            c.approval = "pending"
+        elif kind == "approval_decision":
+            c = get_call(ev)
+            c.approval = "approved" if ev.get("approved") else "rejected"
+            c.approval_message = ev.get("message")
         elif kind == "user_message":
             t = get_turn(turn_no)
             t.user_text = ev.get("text", "")

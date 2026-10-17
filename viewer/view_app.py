@@ -1,720 +1,539 @@
-"""PolyViewer: analyse the agent's step-by-step logs.
+"""PolyAgent: chat with the Polymarket trading agent and approve its orders.
 
 Run with:  streamlit run viewer/view_app.py
-Logs are written by ``src/agent_logger.py`` to ``agent_logs/<date>/<session>.jsonl``.
+
+Every conversation is logged by ``src/agent_logger.py``; the log is also the
+source this page renders the chat from, so past conversations can be reopened
+and analysed in detail on the "logview" page.
 """
 
 from __future__ import annotations
 
 import html
-import inspect
 import json
+import os
 import re
-from datetime import timedelta
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+VIEWER_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(VIEWER_DIR))
+sys.path.insert(0, str(VIEWER_DIR.parent / "src"))
 
 from log_store import (  # noqa: E402
     DEFAULT_LOG_DIR,
     DEFAULT_PRICES,
     Session,
     ToolCall,
+    Turn,
     build_session,
     cost_usd,
     list_log_files,
-    parse_ts,
     read_events,
-    session_summary,
 )
 
-st.set_page_config(page_title="PolyViewer", page_icon="🛰️", layout="wide")
+st.set_page_config(page_title="PolyAgent", page_icon="🤖", layout="wide")
 
-# st.altair_chart gained ``width`` (and deprecated ``use_container_width``) after 1.50.
-CHART_KW = ({"width": "stretch"} if "width" in inspect.signature(st.altair_chart).parameters
-            else {"use_container_width": True})
+try:
+    import config
+    from agent_runner import TradingChat
+    from trade import TRADE
+except Exception as exc:  # missing dependency / credentials
+    st.error(f"エージェントを読み込めませんでした: {exc}")
+    st.stop()
 
-# Colour per element kind; also used by charts so the legend matches the cards.
-COLORS = {
-    "user": "#f59e0b",
-    "reasoning": "#8b5cf6",
-    "tool": "#3b82f6",
-    "ok": "#10b981",
-    "error": "#ef4444",
-    "message": "#64748b",
-    "llm": "#8b5cf6",
-}
+ORDER_TOOLS = {"buy_token", "sell_token"}
+NEW = "__new__"
+EFFORTS = ["(既定)", "minimal", "low", "medium", "high"]
+QUICK_ACTIONS = [
+    ("📋", "ポートフォリオ確認", "現在のポートフォリオを確認して、ポジションごとの損益を表にまとめて"),
+    ("🔥", "注目マーケット", "直近24時間で取引量の多い注目イベントを教えて"),
+    ("🤖", "AI関連を探す", "AI関連で取引量の多いマーケットを探して、価格推移も見せて"),
+    ("🛡️", "リスク評価", "保有ポジションのリスクを評価して、気になる点を教えて"),
+]
 
 CSS = """
 <style>
-.block-container {padding-top: 3.2rem;}
-.pv-hero {display:flex; align-items:center; gap:.8rem; margin-bottom:.3rem;}
-.pv-hero h1 {font-size:1.7rem; margin:0; padding:0;}
-.pv-sub {opacity:.65; font-size:.85rem; margin-bottom:1rem;}
-.pv-chip {display:inline-block; padding:.08rem .55rem; margin:0 .25rem .2rem 0; border-radius:999px;
-          font-size:.76rem; line-height:1.35rem; background:rgba(127,127,127,.14); white-space:nowrap;}
-.pv-chip.ok {background:rgba(16,185,129,.18); color:#10b981;}
-.pv-chip.error {background:rgba(239,68,68,.18); color:#ef4444;}
-.pv-chip.running {background:rgba(245,158,11,.18); color:#d97706;}
-.pv-chip.violet {background:rgba(139,92,246,.18); color:#8b5cf6;}
-.pv-chip.blue {background:rgba(59,130,246,.18); color:#3b82f6;}
-.pv-label {font-weight:700; font-size:.82rem; letter-spacing:.04em; text-transform:uppercase; margin-right:.5rem;}
-.pv-turn {margin:1.6rem 0 .6rem; padding:.55rem .9rem; border-radius:.6rem;
-          background:linear-gradient(90deg, rgba(245,158,11,.20), rgba(245,158,11,0));
-          border-left:5px solid #f59e0b;}
-.pv-turn b {font-size:1.05rem; margin-right:.6rem;}
-.pv-step {margin:.9rem 0 .35rem; font-size:.78rem; opacity:.8; display:flex; align-items:center; gap:.5rem;}
-.pv-step:after {content:""; flex:1; height:1px; background:rgba(127,127,127,.3);}
-.pv-mono {font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.78rem; opacity:.75;}
-div[class*="st-key-card-reason"] {border-left:4px solid #8b5cf6 !important; background:rgba(139,92,246,.06);}
-div[class*="st-key-card-tool-ok"] {border-left:4px solid #3b82f6 !important; background:rgba(59,130,246,.05);}
-div[class*="st-key-card-tool-error"] {border-left:4px solid #ef4444 !important; background:rgba(239,68,68,.06);}
-div[class*="st-key-card-tool-running"] {border-left:4px solid #f59e0b !important; background:rgba(245,158,11,.06);}
-div[class*="st-key-card-msg"] {border-left:4px solid #64748b !important; background:rgba(100,116,139,.06);}
-div[class*="st-key-card-err"] {border-left:4px solid #ef4444 !important; background:rgba(239,68,68,.08);}
-div[class*="st-key-kpi"] div[data-testid="stMetric"] {background:rgba(127,127,127,.07); border-radius:.6rem; padding:.5rem .8rem;}
-div[class*="st-key-kpi"] div[data-testid="stMetricValue"] {font-size:1.45rem;}
-div[class*="st-key-kpi"] div[data-testid="stMetricLabel"] p {font-size:.78rem;}
-.pv-name {font-weight:700; font-size:.92rem; margin-right:.5rem; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;}
+.block-container {padding-top: 3rem; padding-bottom: 6rem;}
+.pa-hero {display:flex; align-items:center; gap:.7rem; margin-bottom:.1rem;}
+.pa-hero h1 {font-size:1.45rem; margin:0; padding:0;}
+.pa-sub {opacity:.65; font-size:.84rem; margin-bottom:.8rem;}
+.pa-chip {display:inline-block; padding:.05rem .5rem; margin:0 .25rem .2rem 0; border-radius:999px;
+          font-size:.74rem; line-height:1.3rem; background:rgba(127,127,127,.14); white-space:nowrap;}
+.pa-chip.ok {background:rgba(16,185,129,.18); color:#10b981;}
+.pa-chip.error {background:rgba(239,68,68,.18); color:#ef4444;}
+.pa-chip.warn {background:rgba(245,158,11,.20); color:#d97706;}
+.pa-chip.violet {background:rgba(139,92,246,.18); color:#8b5cf6;}
+.pa-chip.blue {background:rgba(59,130,246,.18); color:#3b82f6;}
+.pa-reason {border-left:3px solid #8b5cf6; padding:.1rem 0 .1rem .7rem; margin:.3rem 0 .5rem;
+            font-size:.86rem; opacity:.9;}
+.pa-step {font-size:.72rem; font-weight:700; letter-spacing:.05em; opacity:.6; margin-top:.4rem;}
+.pa-order {font-size:1.05rem; font-weight:700;}
+.pa-side-BUY {color:#10b981;} .pa-side-SELL {color:#ef4444;}
+div[class*="st-key-approval"] {border:2px solid #f59e0b !important; background:rgba(245,158,11,.08);}
+div[class*="st-key-order-ok"] {border-left:4px solid #10b981 !important; background:rgba(16,185,129,.06);}
+div[class*="st-key-order-ng"] {border-left:4px solid #ef4444 !important; background:rgba(239,68,68,.06);}
+div[class*="st-key-order-rejected"] {border-left:4px solid #94a3b8 !important; background:rgba(148,163,184,.08);}
+div[class*="st-key-panel"] div[data-testid="stMetricValue"] {font-size:1.25rem;}
 </style>
 """
 
 
-# --------------------------------------------------------------------------- utils
+# --------------------------------------------------------------------- helpers
+def chip(text: str, cls: str = "") -> str:
+    return f'<span class="pa-chip {cls}">{html.escape(str(text))}</span>'
+
+
 def fmt_ms(ms: int | float | None) -> str:
     if ms is None:
         return "–"
     return f"{ms:.0f}ms" if ms < 1000 else f"{ms / 1000:.1f}s"
 
 
-def fmt_int(n: int | float | None) -> str:
-    return "–" if n is None else f"{int(n):,}"
+def reasoning_html(text: str) -> str:
+    """Reasoning summaries are Markdown; keep their bold headings inside HTML."""
+    escaped = html.escape(text)
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped).replace("\n", "<br>")
 
 
-def fmt_time(ts: str | None) -> str:
-    dt = parse_ts(ts)
-    return dt.strftime("%H:%M:%S") if dt else "–"
-
-
-def chip(text: str, cls: str = "") -> str:
-    return f'<span class="pv-chip {cls}">{html.escape(str(text))}</span>'
-
-
-def status_chip(status: str) -> str:
-    return {
-        "ok": chip("✓ OK", "ok"),
-        "error": chip("✗ ERROR", "error"),
-        "running": chip("… 実行中", "running"),
-    }[status]
-
-
-def usage_chips(usage: dict[str, Any], prices: tuple[float, float, float]) -> str:
-    if not usage:
-        return ""
-    return (
-        chip(f"in {fmt_int(usage.get('input_tokens'))} (cache {fmt_int(usage.get('cached_tokens'))})")
-        + chip(f"out {fmt_int(usage.get('output_tokens'))} (reason {fmt_int(usage.get('reasoning_tokens'))})", "violet")
-        + chip(f"${cost_usd(usage, prices):.4f}")
-    )
-
-
-def compact_json(value: Any, limit: int = 160) -> str:
-    text = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+def short(value: Any, limit: int = 80) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def highlight(text: str, query: str) -> str:
-    if not query:
-        return text
-    return re.sub(f"({re.escape(query)})", r":orange-background[\1]", text, flags=re.IGNORECASE)
-
-
-def to_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
-    """DataFrame where nested values are shown as JSON strings."""
-    def cell(v: Any) -> Any:
-        return json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
-    return pd.DataFrame([{k: cell(v) for k, v in r.items()} for r in rows])
-
-
-def render_value(value: Any, key: str) -> None:
-    """Render a tool argument / result in the most readable form."""
+def render_value(value: Any) -> None:
     if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
-        tab_table, tab_json = st.tabs([f"📋 表 ({len(value)}行)", "{ } JSON"])
-        with tab_table:
-            st.dataframe(to_frame(value), hide_index=True, key=f"df-{key}")
-        with tab_json:
-            st.json(value, expanded=1)
+        st.dataframe(pd.DataFrame([{k: short(v, 200) if isinstance(v, (dict, list)) else v
+                                    for k, v in row.items()} for row in value]), hide_index=True)
     elif isinstance(value, (dict, list)):
         st.json(value, expanded=2)
     elif value is None:
         st.caption("(なし)")
     else:
-        text = str(value)
-        if len(text) > 400 or "\n" in text:
-            st.code(text, language=None, wrap_lines=True)
-        else:
-            st.markdown(f"`{text}`" if text else "(空文字)")
+        st.code(str(value), language=None, wrap_lines=True)
 
 
-def render_tool_result(session: Session, call: ToolCall, key: str) -> None:
+def order_side(tool: str) -> str:
+    return "BUY" if tool == "buy_token" else "SELL"
+
+
+def order_amount(tool: str, args: dict[str, Any]) -> str:
+    if tool == "buy_token":
+        return f"{args.get('amount_usd', '?')} USDC"
+    return f"{args.get('shares', '?')} shares"
+
+
+def order_outcome(call: ToolCall) -> tuple[str, str]:
+    """(css key suffix, label) describing what happened to an order."""
+    if call.approval == "rejected":
+        return "rejected", "⛔ 却下（未発注）"
+    if call.approval == "pending":
+        return "rejected", "⏸ 承認待ち"
     if call.error:
-        st.error(f"**{call.error.get('error_type')}**: {call.error.get('error')}")
-        with st.popover("Traceback"):
-            st.code(call.error.get("traceback") or "", language="python")
-        st.caption("モデルに返された値:")
-    image = session.image_file(call)
-    if image is not None:
-        if image.exists():
-            st.image(str(image), caption=image.name)
-        else:
-            st.warning(f"画像ファイルが見つかりません: {image}")
-    elif call.image_url:
-        st.image(call.image_url)
-    else:
-        render_value(call.result, key)
+        return "ng", f"✗ エラー: {call.error.get('error')}"
+    result = call.result if isinstance(call.result, dict) else {}
+    if result.get("success") is False or result.get("errorMsg"):
+        return "ng", f"✗ 不成立: {result.get('errorMsg') or '失敗'}"
+    if call.end_ts is None:
+        return "rejected", "… 実行中"
+    return "ok", "✅ 注文送信済み"
 
 
-# ---------------------------------------------------------------------- loading
+# ------------------------------------------------------------- conversations
 @st.cache_data(show_spinner=False)
 def _load(path: str, mtime: float, size: int) -> Session:
     return build_session(path, read_events(path))
 
 
-def load_session(path: Path) -> Session:
+def load_session(path: Path | str) -> Session | None:
+    path = Path(path)
+    if not path.exists():
+        return None
     stat = path.stat()
     return _load(str(path), stat.st_mtime, stat.st_size)
 
 
-# ---------------------------------------------------------------------- sidebar
-def sidebar() -> dict[str, Any]:
+def ui_conversations() -> dict[str, str]:
+    """Past chats started from this UI: {log path: label}."""
+    convs = {}
+    for path in list_log_files(DEFAULT_LOG_DIR):
+        session = load_session(path)
+        if session is None or session.meta.get("source") != "ui" or not session.turns:
+            continue
+        first = next((t.user_text for t in session.turns if t.user_text), "")
+        start = session.start.strftime("%m/%d %H:%M") if session.start else path.stem
+        convs[str(path)] = f"{start} · {first[:22]}"
+    return convs
+
+
+def current_chat() -> TradingChat | None:
+    """The open chat if it belongs to the selected conversation, else close it."""
+    chat = st.session_state.get("pa_chat")
+    if chat is None:
+        return None
+    conv = st.session_state.get("pa_conv", NEW)
+    if conv == NEW and st.session_state.get("pa_chat_is_new") or str(chat.log_path) == conv:
+        return chat
+    chat.close()
+    st.session_state["pa_chat"] = None
+    return None
+
+
+def ensure_chat() -> TradingChat:
+    """Open (or resume) the selected conversation for sending a message."""
+    chat = current_chat()
+    model = st.session_state.get("pa_model") or config.MODEL
+    effort = st.session_state.get("pa_effort", EFFORTS[0])
+    effort = None if effort == EFFORTS[0] else effort
+    if chat is None:
+        conv = st.session_state.get("pa_conv", NEW)
+        chat = TradingChat(source="ui", log_path=None if conv == NEW else conv,
+                           model=model, reasoning_effort=effort)
+        st.session_state["pa_chat"] = chat
+        st.session_state["pa_chat_is_new"] = conv == NEW
+    else:
+        chat.configure(model, effort)
+    return chat
+
+
+def new_conversation() -> None:
+    chat = st.session_state.get("pa_chat")
+    if chat is not None:
+        chat.close()
+    st.session_state["pa_chat"] = None
+    st.session_state["pa_conv"] = NEW
+
+
+def open_in_logview(path: str) -> None:
+    st.session_state["session"] = path
+    st.session_state["mode"] = "🔍 詳細"
+    st.session_state["date"] = "すべて"
+    st.session_state["pa_goto_logview"] = True
+
+
+# -------------------------------------------------------------------- sidebar
+def sidebar() -> None:
     with st.sidebar:
-        st.markdown("## 🛰️ PolyViewer")
-        log_dir = Path(st.text_input("ログディレクトリ", value=str(DEFAULT_LOG_DIR)))
-        files = list_log_files(log_dir)
+        st.markdown("## 🤖 PolyAgent")
+        st.button("＋ 新しい会話", on_click=new_conversation, type="primary", width="stretch")
 
-        st.session_state.setdefault("mode", "🔍 詳細")
-        if "open_session" in st.session_state:  # row clicked in the overview table
-            st.session_state["session"] = st.session_state.pop("open_session")
-            st.session_state["mode"] = "🔍 詳細"
-            st.session_state["date"] = "すべて"
-        mode = st.segmented_control(
-            "表示モード", ["🔍 詳細", "🌐 全体"], key="mode",
-        )
-        # Clicking the selected option deselects it; keep the previous mode then.
-        if mode is None:
-            mode = st.session_state.get("last_mode", "🔍 詳細")
-        st.session_state["last_mode"] = mode
-        dates = sorted({p.parent.name for p in files}, reverse=True)
-        date = st.selectbox("日付", ["すべて"] + dates, key="date")
-        if date != "すべて":
-            files = [p for p in files if p.parent.name == date]
+        convs = ui_conversations()
+        chat = st.session_state.get("pa_chat")
+        if chat is not None and st.session_state.get("pa_conv") == NEW and str(chat.log_path) in convs:
+            # The new chat has been written to disk: select it in the history.
+            st.session_state["pa_conv"] = str(chat.log_path)
+            st.session_state["pa_chat_is_new"] = False
+        options = [NEW] + list(convs)
+        if st.session_state.get("pa_conv") not in options:
+            st.session_state["pa_conv"] = NEW
+        st.selectbox("会話履歴", options, key="pa_conv",
+                     format_func=lambda p: "🆕 新しい会話" if p == NEW else convs.get(p, p))
 
-        session_path = None
-        if mode == "🔍 詳細" and files:
-            labels = {}
-            for p in files:
-                s = load_session(p)
-                first = next((t.user_text for t in s.turns if t.user_text), "")
-                live = "🟢" if not s.ended else "⚪"
-                start = s.start.strftime("%m/%d %H:%M:%S") if s.start else p.stem
-                labels[str(p)] = f"{live} {start} · {len(s.turns)}T · {first[:18]}"
-            if st.session_state.get("session") not in labels:
-                st.session_state["session"] = str(files[0])
-            session_path = Path(st.selectbox(
-                "セッション", list(labels), format_func=labels.get, key="session",
-            ))
-
-        with st.expander("💲 料金設定 (USD / 1M tokens)"):
-            p_in = st.number_input("入力", value=DEFAULT_PRICES[0], min_value=0.0, step=0.05, format="%.3f")
-            p_cache = st.number_input("キャッシュ入力", value=DEFAULT_PRICES[1], min_value=0.0, step=0.01, format="%.3f")
-            p_out = st.number_input("出力", value=DEFAULT_PRICES[2], min_value=0.0, step=0.1, format="%.3f")
-            st.caption("コストは推定値です。使用モデルの料金に合わせて調整してください。")
-
-        live = st.toggle("🔄 ライブ更新", help="実行中のセッションを数秒ごとに再読み込みします")
-        interval = st.slider("更新間隔(秒)", 2, 30, 5, disabled=not live)
-        st.caption(f"{len(files)} セッション / `{log_dir}`")
-
-    return {
-        "log_dir": log_dir, "files": files, "mode": mode, "session_path": session_path,
-        "prices": (p_in, p_cache, p_out), "live": live, "interval": interval,
-    }
+        st.divider()
+        st.text_input("モデル", value=config.MODEL, key="pa_model")
+        st.selectbox("reasoning effort", EFFORTS, key="pa_effort")
+        st.caption("🛡️ 売買はエージェントが提案した注文を **あなたが承認したときだけ** 実行されます。")
+        if not os.getenv("OPENAI_API_KEY"):
+            st.warning("OPENAI_API_KEY が設定されていません。")
 
 
-# ---------------------------------------------------------------- session: KPIs
-def render_kpis(session: Session, prices: tuple[float, float, float]) -> None:
-    summary = session_summary(session, prices)
-    with st.container(key="kpi-session"):
-        cols = st.columns(8)
-        cols[0].metric("ターン", summary["turns"])
-        cols[1].metric("LLM", summary["llm_calls"])
-        cols[2].metric("ツール", summary["tool_calls"])
-        cols[3].metric("ツールエラー", summary["tool_errors"],
-                       delta=f"run error {summary['run_errors']}" if summary["run_errors"] else None,
-                       delta_color="inverse")
-        cols[4].metric("売買", summary["trades"])
-        cols[5].metric("トークン", fmt_int(summary["total_tokens"]),
-                       help=f"入力 {fmt_int(summary['input_tokens'])} / キャッシュ {fmt_int(summary['cached_tokens'])} / "
-                            f"出力 {fmt_int(summary['output_tokens'])} / 推論 {fmt_int(summary['reasoning_tokens'])}")
-        cache_rate = summary["cached_tokens"] / summary["input_tokens"] if summary["input_tokens"] else 0
-        cols[6].metric("キャッシュ率", f"{cache_rate:.0%}")
-        cols[7].metric("推定コスト", f"${summary['cost_usd']:.4f}")
-
-
-# ----------------------------------------------------------- session: timeline
-def render_timeline(session: Session, prices: tuple[float, float, float]) -> None:
-    if not session.turns:
-        st.info("まだターンがありません。")
+# ------------------------------------------------------------- chat rendering
+def render_activity(turn: Turn, session: Session) -> None:
+    """Reasoning and tool calls of one turn, collapsed by default."""
+    tools = turn.tools
+    if not turn.steps:
         return
-
-    c1, c2, c3 = st.columns([3, 1.2, 1.2])
-    turn_numbers = [t.turn for t in session.turns]
-    selected = c1.pills("ターン", turn_numbers, selection_mode="multi", default=turn_numbers,
-                        format_func=lambda n: f"T{n}", key="tl-turns")
-    show_reasoning = c2.toggle("💭 推論を表示", value=True, key="tl-reason")
-    expand_results = c3.toggle("📦 結果を展開", value=False, key="tl-expand")
-
-    for turn in session.turns:
-        if turn.turn not in (selected or []):
-            continue
-        st.markdown(
-            f'<div class="pv-turn"><b>TURN {turn.turn}</b>'
-            f'{chip("🕒 " + fmt_time(turn.start_ts))}{status_chip(turn.status)}'
-            f'{chip("⏱ " + fmt_ms(turn.duration_ms))}{chip(f"🧠 {len(turn.steps)} LLM", "violet")}'
-            f'{chip(f"🔧 {len(turn.tools)} tools", "blue")}'
-            f'{chip("🪙 " + fmt_int(sum(s.usage.get("total_tokens", 0) for s in turn.steps)) + " tok")}'
-            f'{chip("$" + format(sum(cost_usd(s.usage, prices) for s in turn.steps), ".4f"))}</div>',
-            unsafe_allow_html=True,
-        )
-        with st.chat_message("user"):
-            st.markdown(turn.user_text or "_(入力なし)_")
-
+    label = (f"🧠 思考とツール　·　{len(turn.steps)} steps · {len(tools)} tools"
+             + (f" · {fmt_ms(turn.duration_ms)}" if turn.duration_ms else ""))
+    with st.expander(label):
         for step in turn.steps:
-            st.markdown(
-                f'<div class="pv-step"><span class="pv-label">Step {step.step}</span>'
-                f'{chip("LLM " + fmt_ms(step.duration_ms), "violet")}'
-                f'{chip(f"context {step.input_item_count} items") if step.input_item_count is not None else ""}'
-                f'{usage_chips(step.usage, prices)}</div>',
-                unsafe_allow_html=True,
-            )
-            if show_reasoning and step.reasoning:
-                with st.container(border=True, key=f"card-reason-{turn.turn}-{step.step}"):
-                    st.markdown('<span class="pv-label" style="color:#8b5cf6">💭 Reasoning</span>',
-                                unsafe_allow_html=True)
-                    for text in step.reasoning:
-                        st.markdown(text)
-            elif show_reasoning and any(o.get("type") == "reasoning" for o in step.outputs):
-                st.caption("💭 推論は暗号化されています（要約なし）")
-
-            for call in step.tools:
-                render_tool_card(session, call, expand_results)
-
-            for i, text in enumerate(step.messages):
-                with st.container(border=True, key=f"card-msg-{turn.turn}-{step.step}-{i}"):
-                    with st.chat_message("assistant"):
-                        st.markdown(text)
-
-        if turn.error:
-            with st.container(border=True, key=f"card-err-{turn.turn}"):
-                st.error(f"**実行エラー {turn.error.get('error_type')}**: {turn.error.get('error')}")
-                with st.expander("Traceback"):
-                    st.code(turn.error.get("traceback") or "", language="python")
+            st.markdown(f'<div class="pa-step">STEP {step.step} · LLM {fmt_ms(step.duration_ms)}</div>',
+                        unsafe_allow_html=True)
+            for text in step.reasoning:
+                st.markdown(f'<div class="pa-reason">{reasoning_html(text)}</div>', unsafe_allow_html=True)
+            if step.tools:
+                cols = st.columns(min(len(step.tools), 3))
+                for i, call in enumerate(step.tools):
+                    icon = {"ok": "✓", "error": "✗", "rejected": "⛔", "awaiting": "⏸"}.get(call.status, "…")
+                    label = f"{icon} {call.name} · {fmt_ms(call.duration_ms)}"
+                    with cols[i % len(cols)].popover(label, width="stretch"):
+                        st.caption("引数")
+                        st.json(call.arguments or {}, expanded=True)
+                        st.caption("返り値")
+                        if call.approval == "rejected":
+                            st.info("ユーザーが却下しました")
+                        elif call.error:
+                            st.error(f"{call.error.get('error_type')}: {call.error.get('error')}")
+                        else:
+                            image = session.image_file(call)
+                            if image is not None and image.exists():
+                                st.image(str(image))
+                            else:
+                                render_value(call.result)
 
 
-def render_tool_card(session: Session, call: ToolCall, expanded: bool) -> None:
-    with st.container(border=True, key=f"card-tool-{call.status}-{call.call_id}"):
+def render_order_card(call: ToolCall, key: str) -> None:
+    kind, label = order_outcome(call)
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    side = order_side(call.name)
+    with st.container(border=True, key=f"order-{kind}-{key}"):
         st.markdown(
-            f'<span class="pv-name" style="color:#3b82f6">🔧 {html.escape(call.name)}</span>'
-            f'{status_chip(call.status)}{chip("⏱ " + fmt_ms(call.duration_ms))}'
-            f'{chip("📦 " + fmt_int(call.result_chars) + " chars")}'
-            f'<span class="pv-mono">{html.escape(call.call_id)}</span>',
+            f'<span class="pa-order pa-side-{side}">{side}</span> '
+            f'{chip("token " + str(args.get("token_id", "?")))}{chip(order_amount(call.name, args), "blue")} '
+            f"{html.escape(label)}",
             unsafe_allow_html=True,
         )
-        st.code(json.dumps(call.arguments, ensure_ascii=False, indent=None), language="json", wrap_lines=True)
-        label = "🖼️ 返り値 (画像)" if call.image_path or call.image_url else f"📤 返り値 · {call.result_type or '–'}"
-        with st.expander(label, expanded=expanded or call.status == "error"):
-            render_tool_result(session, call, key=f"tl-{call.call_id}")
 
 
-# ------------------------------------------------------------ session: analysis
-def steps_frame(session: Session, prices: tuple[float, float, float]) -> pd.DataFrame:
-    rows = []
-    for s in session.steps:
-        if s.end_ts is None:  # LLM call still running or aborted by an error
-            continue
-        u = s.usage
-        out, reason = u.get("output_tokens", 0), u.get("reasoning_tokens", 0)
-        cached = u.get("cached_tokens", 0)
-        rows.append({
-            "id": f"T{s.turn}-S{s.step}", "turn": s.turn, "step": s.step,
-            "新規入力": max(u.get("input_tokens", 0) - cached, 0), "キャッシュ入力": cached,
-            "推論出力": reason, "回答出力": max(out - reason, 0),
-            "input_tokens": u.get("input_tokens", 0), "duration_ms": s.duration_ms or 0,
-            "context_items": s.input_item_count, "cost": cost_usd(u, prices),
-            "tools": ", ".join(c.name for c in s.tools),
-        })
-    return pd.DataFrame(rows)
+def render_turn(turn: Turn, session: Session) -> None:
+    with st.chat_message("user"):
+        st.markdown(turn.user_text)
+    with st.chat_message("assistant"):
+        render_activity(turn, session)
+        messages = [m for s in turn.steps for m in s.messages if m]
+        for text in messages:
+            st.markdown(text)
+        for call in turn.tools:
+            image = session.image_file(call)
+            if image is not None and image.exists():
+                st.image(str(image), caption=f"{call.name}({short(call.arguments, 50)})")
+        for call in turn.tools:
+            if call.name in ORDER_TOOLS:
+                render_order_card(call, f"{turn.turn}-{call.call_id}")
+        if turn.error:
+            st.error(f"エラー: {turn.error.get('error_type')}: {turn.error.get('error')}")
+        elif not messages and turn.status == "running":
+            st.caption("（応答が記録されていません）")
 
 
-def render_analysis(session: Session, prices: tuple[float, float, float]) -> None:
-    df = steps_frame(session, prices)
-    if df.empty:
-        st.info("LLM 呼び出しがまだありません。")
-        return
-    order = list(df["id"])
-
-    left, right = st.columns(2)
-    with left:
-        st.markdown("##### 🪙 LLM呼び出しごとのトークン内訳")
-        long = df.melt(id_vars=["id", "tools"], value_vars=["新規入力", "キャッシュ入力", "推論出力", "回答出力"],
-                       var_name="種類", value_name="tokens")
-        chart = alt.Chart(long).mark_bar().encode(
-            x=alt.X("id:N", sort=order, title=None),
-            y=alt.Y("tokens:Q", title="tokens"),
-            color=alt.Color("種類:N", scale=alt.Scale(
-                domain=["新規入力", "キャッシュ入力", "推論出力", "回答出力"],
-                range=["#3b82f6", "#93c5fd", "#8b5cf6", "#c4b5fd"]), legend=alt.Legend(orient="bottom")),
-            tooltip=["id", "種類", alt.Tooltip("tokens:Q", format=","), "tools"],
-        ).properties(height=300)
-        st.altair_chart(chart, **CHART_KW)
-    with right:
-        st.markdown("##### 📈 コンテキスト増加とレイテンシ")
-        base = alt.Chart(df).encode(x=alt.X("id:N", sort=order, title=None))
-        line = base.mark_line(point=True, color="#3b82f6").encode(
-            y=alt.Y("input_tokens:Q", title="入力トークン", axis=alt.Axis(titleColor="#3b82f6")),
-            tooltip=["id", alt.Tooltip("input_tokens:Q", format=","), "context_items"])
-        bars = base.mark_bar(opacity=.35, color="#8b5cf6").encode(
-            y=alt.Y("duration_ms:Q", title="LLM レイテンシ (ms)", axis=alt.Axis(titleColor="#8b5cf6")),
-            tooltip=["id", "duration_ms"])
-        st.altair_chart(alt.layer(bars, line).resolve_scale(y="independent").properties(height=300),
-                        **CHART_KW)
-
-    st.markdown("##### 🕒 実行タイムライン (Gantt)")
-    spans = []
-    for s in session.steps:
-        if s.start_ts and s.end_ts:
-            spans.append({"lane": "🧠 LLM", "start": parse_ts(s.start_ts), "end": parse_ts(s.end_ts),
-                          "kind": "LLM", "label": f"T{s.turn}-S{s.step}", "ms": s.duration_ms})
-        for c in s.tools:
-            if c.start_ts and c.end_ts:
-                spans.append({"lane": f"🔧 {c.name}", "start": parse_ts(c.start_ts), "end": parse_ts(c.end_ts),
-                              "kind": "tool error" if c.error else "tool", "label": f"T{c.turn}-S{c.step}",
-                              "ms": c.duration_ms})
-    if spans:
-        for s in spans:
-            s["start"] = s["start"].replace(tzinfo=None)
-            # Keep very short spans visible.
-            s["end"] = max(s["end"].replace(tzinfo=None), s["start"] + timedelta(milliseconds=150))
-        sdf = pd.DataFrame(spans)
-        gantt = alt.Chart(sdf).mark_bar(cornerRadius=3).encode(
-            x=alt.X("start:T", title=None, axis=alt.Axis(format="%H:%M:%S")),
-            x2="end:T",
-            y=alt.Y("lane:N", title=None, sort=["🧠 LLM"], axis=alt.Axis(labelLimit=260)),
-            color=alt.Color("kind:N", scale=alt.Scale(domain=["LLM", "tool", "tool error"],
-                                                      range=[COLORS["llm"], COLORS["tool"], COLORS["error"]]),
-                            legend=alt.Legend(orient="bottom")),
-            tooltip=["label", "lane", alt.Tooltip("ms:Q", title="ms"),
-                     alt.Tooltip("start:T", format="%H:%M:%S.%L")],
-        ).properties(height=max(140, 44 * sdf["lane"].nunique())).interactive(bind_y=False)
-        st.altair_chart(gantt, **CHART_KW)
-
-    left, right = st.columns([3, 2])
-    with left:
-        st.markdown("##### 🔧 ツール統計")
-        tools = session.tools
-        if tools:
-            tdf = pd.DataFrame([{
-                "tool": c.name, "error": bool(c.error), "ms": c.duration_ms or 0, "chars": c.result_chars or 0,
-            } for c in tools])
-            stats = tdf.groupby("tool").agg(
-                呼び出し=("tool", "size"), エラー=("error", "sum"), 平均ms=("ms", "mean"), 最大ms=("ms", "max"),
-                平均返り値chars=("chars", "mean"),
-            ).reset_index().sort_values("呼び出し", ascending=False)
-            stats["エラー率"] = stats["エラー"] / stats["呼び出し"]
-            st.dataframe(stats, hide_index=True, column_config={
-                "呼び出し": st.column_config.ProgressColumn(format="%d", min_value=0,
-                                                       max_value=int(stats["呼び出し"].max())),
-                "エラー率": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
-                "平均ms": st.column_config.NumberColumn(format="%.0f"),
-                "平均返り値chars": st.column_config.NumberColumn(format="%.0f"),
-            })
-        else:
-            st.caption("ツール呼び出しなし")
-    with right:
-        st.markdown("##### 💲 ターン別コスト")
-        cost = df.groupby("turn", as_index=False)["cost"].sum()
-        cost["turn"] = "T" + cost["turn"].astype(str)
-        st.altair_chart(alt.Chart(cost).mark_bar(color="#f59e0b", cornerRadiusEnd=3).encode(
-            x=alt.X("cost:Q", title="USD"), y=alt.Y("turn:N", sort=None, title=None),
-            tooltip=["turn", alt.Tooltip("cost:Q", format="$.4f")],
-        ).properties(height=max(160, 40 * len(cost))), **CHART_KW)
+def render_approvals(chat: TradingChat) -> None:
+    """Approval cards for orders the agent wants to place."""
+    with st.chat_message("assistant", avatar="⚠️"):
+        st.markdown("**注文の承認が必要です。** 内容を確認して、発注するか却下してください。")
+        decisions = st.session_state.setdefault("pa_decisions", {})
+        for order in chat.pending:
+            side = order_side(order.tool)
+            with st.container(border=True, key=f"approval-{order.call_id}"):
+                c1, c2, c3 = st.columns([1, 2, 1.4])
+                c1.markdown(f'<div class="pa-order pa-side-{side}" style="font-size:1.6rem">{side}</div>',
+                            unsafe_allow_html=True)
+                c2.markdown(f"**token** `{order.arguments.get('token_id', '?')}`")
+                c3.metric("数量" if side == "SELL" else "金額", order_amount(order.tool, order.arguments))
+                position = next((p for p in st.session_state.get("pa_portfolio", {}).get("data", []) or []
+                                 if str(p.get("token_id")) == str(order.arguments.get("token_id"))), None)
+                if position:
+                    c2.caption(f"保有中: {position_title(position)} · {position['size']:.2f} shares "
+                               f"@ 平均 {position['avr_price']:.3f} / 現在 {position['price']:.3f}")
+                st.caption("⚠️ FAK 成行注文です。板の状況により一部のみ約定・価格が変動する可能性があります。")
+                note = st.text_input("却下理由（任意・エージェントに伝えます）", key=f"pa_note_{order.call_id}")
+                b1, b2 = st.columns(2)
+                if b1.button("✅ 承認して発注", key=f"pa_ok_{order.call_id}", type="primary",
+                             width="stretch"):
+                    decisions[order.call_id] = (True, None)
+                if b2.button("❌ 却下", key=f"pa_ng_{order.call_id}", width="stretch"):
+                    decisions[order.call_id] = (False, note)
+                if order.call_id in decisions:
+                    st.caption("✅ 承認済み" if decisions[order.call_id][0] else "⛔ 却下済み")
+        if chat.pending and all(o.call_id in decisions for o in chat.pending):
+            st.session_state["pa_resolve"] = {
+                cid: decisions[cid] for cid in (o.call_id for o in chat.pending)
+            }
+            st.session_state["pa_decisions"] = {}
 
 
-# --------------------------------------------------------------- session: tools
-def render_tools(session: Session) -> None:
-    calls = session.tools
-    if not calls:
-        st.info("ツール呼び出しはありません。")
-        return
+# ----------------------------------------------------------------- live run
+class LiveStatus:
+    """Shows the agent's progress inside an ``st.status`` while it runs."""
 
-    c1, c2, c3 = st.columns([3, 1.4, 2])
-    names = sorted({c.name for c in calls})
-    picked = c1.pills("ツール", names, selection_mode="multi", default=names, key="tools-names")
-    status = c2.segmented_control("状態", ["すべて", "ok", "error"], default="すべて", key="tools-status")
-    status = status or "すべて"
-    query = c3.text_input("引数・返り値を検索", key="tools-q", placeholder="例: 0xabc, token_id ...")
+    def __init__(self, label: str):
+        self.box = st.status(label, expanded=True)
+        self.order_done = False
 
-    def match(c: ToolCall) -> bool:
-        if c.name not in (picked or []):
-            return False
-        if status != "すべて" and c.status != status:
-            return False
-        if query:
-            blob = json.dumps([c.arguments, c.result, c.error], ensure_ascii=False, default=str).lower()
-            return query.lower() in blob
-        return True
+    def __call__(self, record: dict[str, Any]) -> None:
+        event = record.get("event")
+        with self.box:
+            if event == "llm_start":
+                self.box.update(label=f"🧠 考えています…（step {record.get('step')}）")
+            elif event == "llm_end":
+                for out in record.get("outputs", []):
+                    if out.get("type") == "reasoning":
+                        for text in out.get("summary", []):
+                            st.markdown(f'<div class="pa-reason">{reasoning_html(short(text, 400))}</div>',
+                                        unsafe_allow_html=True)
+                    elif out.get("type") == "function_call":
+                        st.markdown(f"🔧 `{out.get('name')}` {short(out.get('arguments'), 70)}")
+            elif event == "tool_start":
+                self.box.update(label=f"🔧 {record.get('tool')} を実行中…")
+            elif event == "tool_end":
+                st.markdown(f"&nbsp;&nbsp;↳ ✓ `{record.get('tool')}` 完了（{fmt_ms(record.get('duration_ms'))}）")
+                if record.get("tool") in ORDER_TOOLS:
+                    self.order_done = True
+            elif event == "tool_error":
+                st.markdown(f"&nbsp;&nbsp;↳ ✗ `{record.get('tool')}` エラー: {short(record.get('error'), 100)}")
+            elif event == "approval_request":
+                st.markdown(f"⏸ `{record.get('tool')}` の承認を待っています")
 
-    filtered = [c for c in calls if match(c)]
-    st.caption(f"{len(filtered)} / {len(calls)} 件　·　行をクリックすると詳細を表示します")
-    table = pd.DataFrame([{
-        "時刻": fmt_time(c.start_ts), "位置": f"T{c.turn}-S{c.step}", "ツール": c.name, "状態": c.status,
-        "引数": compact_json(c.arguments, 80), "ms": c.duration_ms, "chars": c.result_chars,
-        "返り値プレビュー": "(画像)" if c.image_path else compact_json(c.result, 100),
-    } for c in filtered])
-    event = st.dataframe(table, hide_index=True, on_select="rerun", selection_mode="single-row",
-                         key="tools-table", height=min(38 * (len(table) + 1), 360))
-    rows = event.selection.rows if event and event.selection else []
-    if not rows:
-        return
-    call = filtered[rows[0]]
+    def finish(self, label: str, state: str = "complete") -> None:
+        self.box.update(label=label, state=state, expanded=False)
 
-    st.markdown(
-        f'<span class="pv-name" style="color:#3b82f6">🔧 {html.escape(call.name)}</span>'
-        f'{status_chip(call.status)}{chip("T" + str(call.turn) + "-S" + str(call.step))}'
-        f'{chip("⏱ " + fmt_ms(call.duration_ms))}<span class="pv-mono">{html.escape(call.call_id)}</span>',
-        unsafe_allow_html=True,
-    )
-    left, right = st.columns([2, 3])
-    with left:
-        with st.container(border=True, key="card-reason-detail"):
-            st.markdown("**💭 呼び出し前の推論**")
-            if call.reasoning:
-                for text in call.reasoning:
-                    st.markdown(text)
+
+def run_agent(prompt: str | None = None, resolve: dict[str, tuple[bool, str | None]] | None = None) -> None:
+    chat = ensure_chat()
+    if prompt is not None:
+        with st.chat_message("user"):
+            st.markdown(prompt)
+    with st.chat_message("assistant"):
+        live = LiveStatus("🤖 エージェントが作業中…" if prompt else "📨 注文の判断を伝えています…")
+        chat.set_listener(live)
+        try:
+            if prompt is not None:
+                result = chat.send(prompt)
             else:
-                st.caption("推論の要約はありません")
-        with st.container(border=True):
-            st.markdown("**📥 引数**")
-            render_value(call.arguments, key=f"args-{call.call_id}")
-    with right:
-        with st.container(border=True, key=f"card-tool-{call.status}-detail"):
-            st.markdown("**📤 返り値**")
-            render_tool_result(session, call, key=f"detail-{call.call_id}")
-
-
-# ----------------------------------------------------------- session: reasoning
-def render_reasoning(session: Session) -> None:
-    steps = session.steps
-    if not any(s.reasoning for s in steps):
-        encrypted = any(o.get("type") == "reasoning" for s in steps for o in s.outputs)
-        st.info(
-            "推論の要約が記録されていません。"
-            + ("（推論アイテムは存在しますが暗号化されています）" if encrypted else "")
-            + "\n\n`src/config.py` の `REASONING_SUMMARY = \"auto\"` と、推論対応モデルを使っているか確認してください。"
-        )
-        return
-
-    c1, c2 = st.columns([3, 1])
-    query = c1.text_input("推論を検索", key="reason-q", placeholder="キーワードでハイライト・絞り込み")
-    only_tools = c2.toggle("ツール呼び出しを伴う推論のみ", key="reason-tools")
-
-    total_reason = sum(s.usage.get("reasoning_tokens", 0) for s in steps)
-    st.caption(f"推論トークン合計 {fmt_int(total_reason)}")
-
-    for s in steps:
-        if not s.reasoning or (only_tools and not s.tools):
-            continue
-        joined = "\n\n".join(s.reasoning)
-        if query and query.lower() not in joined.lower():
-            continue
-        with st.container(border=True, key=f"card-reason-tab-{s.turn}-{s.step}"):
-            st.markdown(
-                f'<span class="pv-label" style="color:#8b5cf6">T{s.turn} · Step {s.step}</span>'
-                f'{chip("reasoning " + fmt_int(s.usage.get("reasoning_tokens")) + " tok", "violet")}'
-                f'{chip("LLM " + fmt_ms(s.duration_ms))}',
-                unsafe_allow_html=True,
-            )
-            st.markdown(highlight(joined, query))
-            actions = [chip(f"🔧 {c.name}({compact_json(c.arguments, 60)})", "error" if c.error else "blue")
-                       for c in s.tools]
-            actions += [chip("💬 " + compact_json(m, 70)) for m in s.messages]
-            if actions:
-                st.markdown('<span class="pv-label">→ 次のアクション</span>' + "".join(actions), unsafe_allow_html=True)
-
-
-# --------------------------------------------------------- session: info & raw
-def render_info(session: Session) -> None:
-    meta = session.meta
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(f"**モデル**  \n`{meta.get('model', '?')}`")
-    c2.markdown(f"**推論設定**  \n`{json.dumps(meta.get('reasoning'), ensure_ascii=False)}`")
-    c3.markdown(f"**ログファイル**  \n`{session.path}`")
-    with st.expander("📜 システムプロンプト (instructions)"):
-        st.code(meta.get("instructions") or "(記録なし)", language="markdown", wrap_lines=True)
-    st.markdown("##### 🧰 利用可能なツール")
-    for tool in meta.get("tools", []) or []:
-        with st.expander(f"🔧 {tool.get('name')}"):
-            st.markdown(tool.get("description") or "")
-            st.json(tool.get("parameters") or {}, expanded=False)
-
-
-def render_raw(session: Session) -> None:
-    events = session.events
-    kinds = sorted({e.get("event") for e in events})
-    picked = st.pills("イベント種別", kinds, selection_mode="multi", default=kinds, key="raw-kinds")
-    filtered = [e for e in events if e.get("event") in (picked or [])]
-    skip = {"ts", "session_id", "event", "turn", "step"}
-    table = pd.DataFrame([{
-        "時刻": e.get("ts", "")[11:23], "event": e.get("event"), "turn": e.get("turn"), "step": e.get("step"),
-        "内容": compact_json({k: v for k, v in e.items() if k not in skip}, 140),
-    } for e in filtered])
-    event = st.dataframe(table, hide_index=True, on_select="rerun", selection_mode="single-row",
-                         key="raw-table", height=420)
-    rows = event.selection.rows if event and event.selection else []
-    if rows:
-        st.json(filtered[rows[0]], expanded=2)
-    st.download_button("⬇️ JSONL をダウンロード", data=session.path.read_bytes(),
-                       file_name=session.path.name, mime="application/jsonl")
-
-
-def render_session(path: Path, prices: tuple[float, float, float]) -> None:
-    session = load_session(path)
-    start = session.start.strftime("%Y-%m-%d %H:%M:%S") if session.start else "?"
-    state = chip("🟢 実行中 / 未終了", "running") if not session.ended else chip("⚪ 終了", "")
-    st.markdown(
-        f'<div class="pv-hero"><h1>🛰️ {html.escape(session.session_id)}</h1>{state}</div>'
-        f'<div class="pv-sub">{start} 開始 · model <code>{html.escape(str(session.meta.get("model", "?")))}</code>'
-        f' · {len(session.events)} events</div>',
-        unsafe_allow_html=True,
-    )
-    render_kpis(session, prices)
-    tabs = st.tabs(["🧵 タイムライン", "📊 分析", "🔧 ツール", "💭 推論", "⚙️ セッション情報", "🗂️ Raw"])
-    with tabs[0]:
-        render_timeline(session, prices)
-    with tabs[1]:
-        render_analysis(session, prices)
-    with tabs[2]:
-        render_tools(session)
-    with tabs[3]:
-        render_reasoning(session)
-    with tabs[4]:
-        render_info(session)
-    with tabs[5]:
-        render_raw(session)
-
-
-# --------------------------------------------------------------------- overview
-def render_overview(files: list[Path], prices: tuple[float, float, float]) -> None:
-    st.markdown('<div class="pv-hero"><h1>🌐 全体サマリー</h1></div>'
-                '<div class="pv-sub">全セッションを横断した利用状況</div>', unsafe_allow_html=True)
-    sessions = [load_session(p) for p in files]
-    df = pd.DataFrame([session_summary(s, prices) for s in sessions])
-
-    with st.container(key="kpi-overview"):
-        cols = st.columns(6)
-        cols[0].metric("セッション", len(df))
-        cols[1].metric("ターン", int(df["turns"].sum()))
-        cols[2].metric("ツール呼び出し", int(df["tool_calls"].sum()))
-        cols[3].metric("エラー", int(df["tool_errors"].sum() + df["run_errors"].sum()))
-        cols[4].metric("総トークン", fmt_int(df["total_tokens"].sum()))
-        cols[5].metric("推定コスト", f"${df['cost_usd'].sum():.3f}")
-
-    left, right = st.columns(2)
-    with left:
-        st.markdown("##### 📅 日別コストとトークン")
-        daily = df.groupby("date", as_index=False).agg(cost=("cost_usd", "sum"), tokens=("total_tokens", "sum"),
-                                                       sessions=("session_id", "count"))
-        st.altair_chart(alt.Chart(daily).mark_bar(color="#f59e0b", cornerRadiusEnd=3, size=28).encode(
-            x=alt.X("date:N", title=None, axis=alt.Axis(labelAngle=0)), y=alt.Y("cost:Q", title="USD"),
-            tooltip=["date", alt.Tooltip("cost:Q", format="$.4f"), alt.Tooltip("tokens:Q", format=","), "sessions"],
-        ).properties(height=260), **CHART_KW)
-    with right:
-        st.markdown("##### 🔧 ツール利用回数")
-        tdf = pd.DataFrame([{"tool": c.name, "状態": "error" if c.error else "ok"}
-                            for s in sessions for c in s.tools])
-        if not tdf.empty:
-            tdf = tdf.groupby(["tool", "状態"], as_index=False).size().rename(columns={"size": "回数"})
-            st.altair_chart(alt.Chart(tdf).mark_bar(cornerRadiusEnd=3).encode(
-                y=alt.Y("tool:N", sort="-x", title=None, axis=alt.Axis(labelLimit=260)),
-                x=alt.X("sum(回数):Q", title="回数"),
-                color=alt.Color("状態:N", scale=alt.Scale(domain=["ok", "error"],
-                                                         range=[COLORS["tool"], COLORS["error"]]),
-                                legend=alt.Legend(orient="bottom")),
-                tooltip=["tool", "状態", "回数"],
-            ).properties(height=max(200, 34 * tdf["tool"].nunique())), **CHART_KW)
+                result = chat.resolve({k: v[0] for k, v in resolve.items()},
+                                      {k: v[1] for k, v in resolve.items() if v[1]})
+        finally:
+            chat.set_listener(None)
+        if result.error is not None:
+            live.finish("エラーが発生しました", state="error")
+        elif result.needs_approval:
+            live.finish("⏸ 注文の承認待ち")
         else:
-            st.caption("ツール呼び出しなし")
-
-    st.markdown("##### 🗂️ セッション一覧　<small>(行をクリックで詳細へ)</small>", unsafe_allow_html=True)
-    view = df[["live", "start", "turns", "llm_calls", "tool_calls", "tool_errors", "run_errors", "trades",
-               "total_tokens", "cost_usd", "duration_s", "first_message", "model"]].copy()
-    view["live"] = view["live"].map({True: "🟢", False: "⚪"})
-    view["start"] = view["start"].map(lambda d: d.strftime("%Y-%m-%d %H:%M:%S") if d else "")
-    event = st.dataframe(
-        view, hide_index=True, selection_mode="single-row", key="overview-table", on_select="rerun",
-        column_config={
-            "live": st.column_config.TextColumn("", width="small"),
-            "start": "開始", "turns": "ターン", "llm_calls": "LLM", "tool_calls": "ツール",
-            "tool_errors": "ツールエラー", "run_errors": "実行エラー", "trades": "売買",
-            "total_tokens": st.column_config.NumberColumn("トークン", format="%d"),
-            "cost_usd": st.column_config.ProgressColumn("コスト", format="$%.4f", min_value=0,
-                                                       max_value=float(max(df["cost_usd"].max(), 1e-9))),
-            "duration_s": st.column_config.NumberColumn("時間(s)", format="%.0f"),
-            "first_message": "最初のメッセージ", "model": "モデル",
-        },
-    )
-    rows = event.selection.rows if event and event.selection else []
-    if rows:
-        # Widgets in the sidebar are already rendered; switch on the next full run.
-        st.session_state["open_session"] = df["path"].iloc[rows[0]]
-        st.rerun(scope="app")
-
-    errors = [(s, c) for s in sessions for c in s.tools if c.error]
-    if errors:
-        st.markdown("##### 🚨 最近のツールエラー")
-        for s, c in errors[:15]:
-            st.markdown(
-                f'{chip(fmt_time(c.start_ts))}{chip(s.session_id)}{chip("🔧 " + c.name, "blue")}'
-                f'{chip((c.error or {}).get("error_type") or "", "error")} '
-                f'<span class="pv-mono">{html.escape(compact_json((c.error or {}).get("error"), 140))}</span>',
-                unsafe_allow_html=True,
-            )
+            live.finish("✓ 完了")
+    if live.order_done:
+        st.session_state.pop("pa_portfolio", None)  # refresh positions after an order
+    st.rerun()
 
 
-# ------------------------------------------------------------------------- main
+# ------------------------------------------------------------------ side panels
+def position_title(position: dict[str, Any]) -> str:
+    first = (position.get("text") or "").splitlines()[:1]
+    return first[0].replace("タイトル:", "").strip() if first else str(position.get("condition_id", ""))
+
+
+def load_portfolio(force: bool = False) -> dict[str, Any]:
+    cached = st.session_state.get("pa_portfolio")
+    if cached is not None and not force:
+        return cached
+    try:
+        data = TRADE().get_self_status()
+        cached = {"data": data, "error": None, "at": time.strftime("%H:%M:%S")}
+    except Exception as exc:
+        cached = {"data": [], "error": str(exc), "at": time.strftime("%H:%M:%S")}
+    st.session_state["pa_portfolio"] = cached
+    return cached
+
+
+def render_portfolio() -> None:
+    with st.container(border=True, key="panel-portfolio"):
+        head, btn = st.columns([5, 1], vertical_alignment="center")
+        head.markdown("##### 💼 ポートフォリオ")
+        force = btn.button("🔄", help="最新の保有状況を取得", key="pa_refresh")
+        with st.spinner("取得中…"):
+            pf = load_portfolio(force)
+        if pf["error"]:
+            st.warning(f"取得できませんでした: {pf['error']}")
+            return
+        data = pf["data"] or []
+        value = sum(p["size"] * p["price"] for p in data)
+        pnl = sum(p.get("delta", 0) for p in data)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("評価額", f"${value:,.2f}")
+        m2.metric("含み損益", f"${pnl:+,.2f}")
+        m3.metric("銘柄数", len(data))
+        if data:
+            df = pd.DataFrame([{
+                "市場": f"{position_title(p)} ({p.get('token_name')})", "数量": p["size"],
+                "平均": p["avr_price"], "現在": p["price"], "損益": p.get("delta", 0),
+            } for p in data])
+            st.dataframe(df, hide_index=True, column_config={
+                "数量": st.column_config.NumberColumn(format="%.2f"),
+                "平均": st.column_config.NumberColumn(format="%.3f"),
+                "現在": st.column_config.NumberColumn(format="%.3f"),
+                "損益": st.column_config.NumberColumn(format="%+.2f"),
+            })
+        st.caption(f"更新 {pf['at']}")
+
+
+def render_quick_actions(disabled: bool) -> None:
+    with st.container(border=True, key="panel-quick"):
+        st.markdown("##### ⚡ クイックアクション")
+        cols = st.columns(2)
+        for i, (icon, label, prompt) in enumerate(QUICK_ACTIONS):
+            if cols[i % 2].button(f"{icon} {label}", key=f"pa_quick_{i}", disabled=disabled,
+                                  width="stretch", help=prompt):
+                st.session_state["pa_queued"] = prompt
+
+
+def render_session_panel(session: Session | None) -> None:
+    with st.container(border=True, key="panel-session"):
+        st.markdown("##### 🧾 この会話")
+        if session is None:
+            st.caption("まだメッセージがありません。")
+            return
+        orders = [c for c in session.tools if c.name in ORDER_TOOLS]
+        tokens = sum(s.usage.get("total_tokens", 0) for s in session.steps)
+        cost = sum(cost_usd(s.usage, DEFAULT_PRICES) for s in session.steps)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("ターン", len(session.turns))
+        m2.metric("ツール", len(session.tools))
+        m3.metric("コスト", f"${cost:.3f}", help=f"{tokens:,} tokens（料金はログビューアで調整可）")
+        if orders:
+            st.markdown("**注文履歴**")
+            for call in reversed(orders):
+                render_order_card(call, f"side-{call.call_id}")
+        st.button("📊 ログビューアで詳しく見る", on_click=open_in_logview, args=(str(session.path),),
+                  width="stretch")
+
+
+# ------------------------------------------------------------------------ main
 def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
-    opts = sidebar()
+    if st.session_state.pop("pa_goto_logview", False):
+        st.switch_page("pages/logview.py")
+    sidebar()
 
-    if not opts["files"]:
-        st.markdown('<div class="pv-hero"><h1>🛰️ PolyViewer</h1></div>', unsafe_allow_html=True)
-        st.info(f"ログがまだありません: `{opts['log_dir']}`\n\n"
-                "`python src/main.py` でエージェントを実行すると、行動ログがここに記録されます。")
-        return
+    chat = current_chat()
+    conv = st.session_state.get("pa_conv", NEW)
+    log_path = chat.log_path if chat is not None else (None if conv == NEW else Path(conv))
+    session = load_session(log_path) if log_path is not None else None
+    if session is not None and not session.turns:
+        session = None
+    pending = bool(chat and chat.pending)
 
-    @st.fragment(run_every=opts["interval"] if opts["live"] else None)
-    def body() -> None:
-        if opts["mode"] == "🌐 全体":
-            render_overview(opts["files"], opts["prices"])
-        elif opts["session_path"] is not None:
-            render_session(opts["session_path"], opts["prices"])
+    left, right = st.columns([2.3, 1], gap="large")
+    with left:
+        title = short(session.turns[0].user_text, 30) if session else "新しい会話"
+        st.markdown(f'<div class="pa-hero"><h1>🤖 {html.escape(title)}</h1></div>'
+                    f'<div class="pa-sub">model <code>{html.escape(st.session_state.get("pa_model") or config.MODEL)}'
+                    f"</code> · Polymarket トレーディングエージェント</div>", unsafe_allow_html=True)
+        if session is None:
+            st.info("👋 何でも聞いてください。例: 「AI関連の注目マーケットを探して」「保有ポジションを確認して」\n\n"
+                    "右側のクイックアクションからも始められます。")
+        else:
+            for turn in session.turns:
+                render_turn(turn, session)
+        if pending:
+            render_approvals(chat)
 
-    body()
+    with right:
+        render_portfolio()
+        render_quick_actions(disabled=pending)
+        render_session_panel(session)
+
+    prompt = st.chat_input(
+        "承認待ちの注文があります" if pending else "メッセージを入力（Enterで送信）", disabled=pending)
+    queued = st.session_state.pop("pa_queued", None)
+    resolve = st.session_state.pop("pa_resolve", None)
+    with left:
+        if resolve and chat is not None and chat.pending:
+            run_agent(resolve=resolve)
+        elif (prompt or queued) and not pending:
+            run_agent(prompt=prompt or queued)
 
 
 main()

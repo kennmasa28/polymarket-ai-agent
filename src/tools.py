@@ -90,7 +90,8 @@ def get_market_history_image(condition_id: str) -> ToolOutputImage:
     return ToolOutputImage(image_url=f"data:image/png;base64,{image_base64}")
 
 
-@function_tool(failure_error_function=tool_failure_handler)
+# Live order: every call must be approved by the user (see agent_runner.TradingChat).
+@function_tool(failure_error_function=tool_failure_handler, needs_approval=True)
 def buy_token(token_id: str, amount_usd: int) -> str:
     """Place a live market BUY order for a Polymarket outcome token.
 
@@ -105,7 +106,8 @@ def buy_token(token_id: str, amount_usd: int) -> str:
     return _serialise_result(TRADE().make_buy_order(token_id, amount_usd, "BUY"))
 
 
-@function_tool(failure_error_function=tool_failure_handler)
+# Live order: every call must be approved by the user (see agent_runner.TradingChat).
+@function_tool(failure_error_function=tool_failure_handler, needs_approval=True)
 def sell_token(token_id: str, shares: int) -> str:
     """Place a live market SELL order for a Polymarket outcome token.
 
