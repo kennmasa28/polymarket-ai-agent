@@ -25,6 +25,11 @@ VIEWER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(VIEWER_DIR))
 sys.path.insert(0, str(VIEWER_DIR.parent / "src"))
 
+from auth import require_auth  # noqa: E402
+
+st.set_page_config(page_title="PolyAgent", page_icon="🤖", layout="wide")
+require_auth()
+
 from log_store import (  # noqa: E402
     DEFAULT_LOG_DIR,
     DEFAULT_PRICES,
@@ -36,8 +41,6 @@ from log_store import (  # noqa: E402
     list_log_files,
     read_events,
 )
-
-st.set_page_config(page_title="PolyAgent", page_icon="🤖", layout="wide")
 
 try:
     import config

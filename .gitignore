@@ -137,6 +137,7 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.streamlit/secrets.toml
 .venv
 env/
 venv/
@@ -217,3 +218,6 @@ src/congig.py
 transaction_logs
 *json
 legacy/
+.streamlit
+*.toml
+password_hash.py

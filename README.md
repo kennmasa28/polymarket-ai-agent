@@ -8,6 +8,32 @@ pip install streamlit altair pandas
 streamlit run viewer/view_app.py
 ```
 
+Generate a salted password hash locally:
+
+```powershell
+python viewer/password_hash.py 'your-plain-text-password'
+```
+
+Before starting the viewer, configure its username and the generated hash with
+environment variables (the username defaults to `admin`):
+
+```powershell
+$env:POLYAGENT_USERNAME = "admin"
+$env:POLYAGENT_PASSWORD_HASH = 'scrypt$...'
+streamlit run viewer/view_app.py
+```
+
+Alternatively, create an ignored `.streamlit/secrets.toml` file:
+
+```toml
+[auth]
+username = "admin"
+password_hash = "scrypt$..."
+```
+
+The login protects every page in the viewer. Use the sidebar's **ログアウト**
+button to close the active chat and clear the browser session.
+
 Chat with the trading agent in the browser:
 
 - The agent's reasoning and tool calls are shown live while it works, and stay

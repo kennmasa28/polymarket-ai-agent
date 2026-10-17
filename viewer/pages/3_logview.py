@@ -21,6 +21,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # viewer/
 
+from auth import require_auth  # noqa: E402
 from log_store import (  # noqa: E402
     DEFAULT_LOG_DIR,
     DEFAULT_PRICES,
@@ -35,6 +36,7 @@ from log_store import (  # noqa: E402
 )
 
 st.set_page_config(page_title="PolyViewer", page_icon="🛰️", layout="wide")
+require_auth()
 
 # st.altair_chart gained ``width`` (and deprecated ``use_container_width``) after 1.50.
 CHART_KW = ({"width": "stretch"} if "width" in inspect.signature(st.altair_chart).parameters

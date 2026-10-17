@@ -7,13 +7,18 @@ import json
 import pandas as pd
 import sys
 
-# Add parent directory to path to import src modules
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+# Add viewer and src directories to the import path.
+VIEWER_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(VIEWER_DIR))
+sys.path.insert(0, str(VIEWER_DIR.parent / "src"))
+
+from auth import require_auth
+
+st.set_page_config(layout="wide")
+require_auth()
 
 from trade import TRADE
 import config
-
-st.set_page_config(layout="wide")
 
 st.title("保有トークン一覧")
 
