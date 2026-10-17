@@ -1,64 +1,59 @@
-"""Interactive Polymarket trading chat powered by the OpenAI Agents SDK."""
+"""Interactive Polymarket trading chat powered by the OpenAI Agents SDK.
+
+The Streamlit UI (``streamlit run viewer/view_app.py``) offers the same agent
+with a richer interface; this module is the terminal version.
+"""
 
 from __future__ import annotations
 
+import json
 import os
 
-from agents import Agent, Runner, SQLiteSession
-
-import config
-from slills_loader import skills_as_instructions
-from tools import TRADING_TOOLS
+from agent_runner import TradingChat, TurnResult
 
 
-BASE_INSTRUCTIONS = """You are a Polymarket token trading assistant.
-Respond in Japanese unless the user requests another language.  You may use
-the portfolio tool to inspect the account.  Buy and sell tools place LIVE
-orders: before calling either, state the token ID, direction, amount/shares,
-and material execution risk, then obtain an explicit confirmation from the
-user in the current conversation.  Never invent a token ID, position, price,
-or tool result.  Do not provide financial advice; present information and let
-the user decide.
-"""
-
-
-def create_agent() -> Agent:
-    """Create the trading agent with all Markdown skills loaded as guidance."""
-    instructions = f"{BASE_INSTRUCTIONS}\n\n# Local skills\n{skills_as_instructions()}"
-    return Agent(
-        name="Polymarket Trading Agent",
-        model=config.MODEL,
-        instructions=instructions,
-        tools=TRADING_TOOLS,
-    )
+def ask_approvals(result: TurnResult) -> dict[str, bool]:
+    """Ask in the terminal whether each pending live order may be placed."""
+    decisions = {}
+    for order in result.pending:
+        print(f"\n⚠️  注文の承認が必要です: {order.tool}")
+        print(json.dumps(order.arguments, ensure_ascii=False, indent=2))
+        answer = input("この注文を発注しますか？ [y/N] ").strip().lower()
+        decisions[order.call_id] = answer in {"y", "yes"}
+    return decisions
 
 
 def main() -> None:
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY を環境変数に設定してください。")
 
-    agent = create_agent()
-    session = SQLiteSession("polymarket-trading-chat")
+    chat = TradingChat(source="cli")
+    print(f"ログ: {chat.log_path}")
     print("Polymarket trading agent. 終了するには exit または quit を入力してください。")
 
-    while True:
-        try:
-            message = input("\nYou> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n終了します。")
-            return
+    try:
+        while True:
+            try:
+                message = input("\nYou> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n終了します。")
+                return
 
-        if message.lower() in {"exit", "quit"}:
-            print("終了します。")
-            return
-        if not message:
-            continue
+            if message.lower() in {"exit", "quit"}:
+                print("終了します。")
+                return
+            if not message:
+                continue
 
-        try:
-            result = Runner.run_sync(agent, message, session=session)
-            print(f"\nAgent> {result.final_output}")
-        except Exception as exc:
-            print(f"\nエラー: {exc}")
+            result = chat.send(message)
+            while result.needs_approval:
+                result = chat.resolve(ask_approvals(result))
+            if result.error is not None:
+                print(f"\nエラー: {result.error}")
+            else:
+                print(f"\nAgent> {result.final_output}")
+    finally:
+        chat.close()
 
 
 if __name__ == "__main__":

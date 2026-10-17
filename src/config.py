@@ -25,3 +25,5 @@ CONSECUTIVE_DECREASE_THRESHOLD = 0.07
 ## OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = "gpt-5.6-luna"
+REASONING_EFFORT = None    # None = model default; or "low" / "medium" / "high"
+REASONING_SUMMARY = "auto" # reasoning summaries are written to agent_logs/

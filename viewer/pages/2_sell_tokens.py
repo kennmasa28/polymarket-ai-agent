@@ -47,7 +47,7 @@ try:
         st.subheader("詳細情報")
         for i, holding in enumerate(holdings):
             title = holding['text'].split('\n')[0].replace('タイトル: ', '')
-            with st.expander(f"【{holding['token_name']}】{title}"):
+            with st.popover(f"【{holding['token_name']}】{title}"):
                 # Display holding details
                 st.text(holding['text'])
                 
