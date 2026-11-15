@@ -1,0 +1,9 @@
+# Agent
+openai-agents
+polymarket-client>=0.10
+requests
+matplotlib
+python-dateutil
+
+# Web app
+flask>=3.0

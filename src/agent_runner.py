@@ -172,6 +172,7 @@ class TradingChat:
                 self.logger.log_approval_decision(i["call_id"], i.get("name"), False, reason)
 
     def _run(self, run_input: Any) -> TurnResult:
+        self.logger.activate()
         try:
             result = Runner.run_sync(self.agent, run_input, session=self.memory, hooks=self.logger)
         except Exception as exc:

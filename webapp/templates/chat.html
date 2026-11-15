@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}エージェント · PolyAgent{% endblock %}
+{% block main %}
+<div class="chat-layout" id="layout"
+     data-conversation="{{ conversation_id }}" data-default-model="{{ default_model }}"
+     data-has-key="{{ '1' if has_openai_key else '0' }}">
+  <aside class="conv-panel">
+    <div class="head">
+      <button class="btn primary block" id="new-chat">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新しい会話</button>
+      <input id="conv-search" placeholder="会話を検索…" autocomplete="off">
+    </div>
+    <div class="conv-list" id="conv-list"><div class="skeleton" style="height:48px;margin:8px"></div></div>
+  </aside>
+
+  <section class="chat-col">
+    <header class="chat-top">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <button class="btn ghost icon only-mobile" id="toggle-convs" title="会話一覧">☰</button>
+        <h2 id="chat-title">新しい会話</h2>
+        <span class="chip" id="chat-model"></span>
+      </div>
+      <div class="chips">
+        <a class="btn sm ghost hidden" id="open-log" href="#">📊 ログで詳しく見る</a>
+        <button class="btn sm ghost" id="toggle-side" title="ポートフォリオ">💼</button>
+      </div>
+    </header>
+    <div class="chat-scroll" id="chat-scroll">
+      <div class="thread" id="thread"></div>
+    </div>
+    <div class="composer-wrap">
+      {% if not has_openai_key %}
+        <div class="callout warn" style="max-width:860px;margin:0 auto 10px">OPENAI_API_KEY が設定されていません。エージェントは実行できません。</div>
+      {% endif %}
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="メッセージを入力…（Enterで送信 / Shift+Enterで改行）"></textarea>
+        <button class="btn ghost icon" type="button" id="open-settings" title="モデル設定">
+          <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></button>
+        <button class="btn primary icon" type="submit" id="send" title="送信">
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </form>
+      <div class="composer-meta"><span>🛡️ 売買は提案された注文を<b>あなたが承認したときだけ</b>実行されます</span><span id="composer-status"></span></div>
+    </div>
+    <div class="card settings-pop hidden" id="settings">
+      <div class="card-title"><span class="dot"></span>モデル設定</div>
+      <label class="field"><span>モデル</span><input id="set-model" autocomplete="off"></label>
+      <label class="field"><span>reasoning effort</span>
+        <select id="set-effort"><option value="">（既定）</option><option>minimal</option><option>low</option><option>medium</option><option>high</option></select></label>
+      <p class="faint" style="margin:0;font-size:12px">次のメッセージから反映されます。</p>
+    </div>
+  </section>
+
+  <aside class="side-panel" id="side-panel">
+    <div class="card card-pad">
+      <div class="card-head"><div class="card-title"><span class="dot"></span>ポートフォリオ</div>
+        <button class="btn sm ghost" id="refresh-portfolio" title="更新">↻</button></div>
+      <div id="portfolio"><div class="skeleton" style="height:120px"></div></div>
+    </div>
+    <div class="card card-pad">
+      <div class="card-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent-2)"></span>クイックアクション</div>
+      <div class="stack" style="gap:6px" id="quick"></div>
+    </div>
+    <div class="card card-pad">
+      <div class="card-title" style="margin-bottom:10px"><span class="dot" style="background:var(--amber)"></span>この会話</div>
+      <div id="conv-stats" class="muted" style="font-size:13px">まだメッセージがありません。</div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='js/chat.js') }}"></script>{% endblock %}

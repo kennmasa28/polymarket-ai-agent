@@ -1,4 +1,4 @@
-"""Step-by-step JSONL logging of agent behaviour for ``viewer/view_app.py``.
+"""Step-by-step JSONL logging of agent behaviour (analysed in the web app's log page).
 
 Every run writes one file per chat session:
 ``agent_logs/<YYYY-MM-DD>/<session_id>.jsonl``.  Each line is one event, and
@@ -24,6 +24,7 @@ Event types (``event`` field):
 from __future__ import annotations
 
 import base64
+import contextvars
 import json
 import time
 import traceback
@@ -38,9 +39,12 @@ from agents.items import ModelResponse, TResponseInputItem
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOG_DIR = PROJECT_ROOT / "agent_logs"
 
-# The logger currently attached to a run; used by ``tool_failure_handler``,
-# which the Agents SDK calls without access to the hooks object.
-_active_logger: AgentLogger | None = None
+# The logger of the run in progress; used by ``tool_failure_handler``, which
+# the Agents SDK calls without access to the hooks object.  A context variable
+# keeps concurrent runs (one per thread in the web app) apart.
+_current_logger: contextvars.ContextVar[AgentLogger | None] = contextvars.ContextVar(
+    "agent_logger", default=None
+)
 
 
 def _now() -> str:
@@ -139,8 +143,6 @@ class AgentLogger(RunHooks):
         ``listener`` is called with every record as it is written, which lets
         a UI show the agent's progress live.
         """
-        global _active_logger
-
         started = datetime.now()
         if path is not None:
             self.path = Path(path)
@@ -160,7 +162,11 @@ class AgentLogger(RunHooks):
         self._turn_started = 0.0
         self._llm_started = 0.0
         self._tool_started: dict[str, float] = {}
-        _active_logger = self
+        _current_logger.set(self)
+
+    def activate(self) -> None:
+        """Make this logger receive tool errors of runs started from this context."""
+        _current_logger.set(self)
 
     # ------------------------------------------------------------------ core
     def write(self, event: str, **fields: Any) -> None:
@@ -360,6 +366,7 @@ class AgentLogger(RunHooks):
 def tool_failure_handler(context: RunContextWrapper, error: Exception) -> str:
     """``failure_error_function`` that records the real exception before
     returning the SDK's default message to the model."""
-    if _active_logger is not None:
-        _active_logger.log_tool_error(context, error)
+    logger = _current_logger.get()
+    if logger is not None:
+        logger.log_tool_error(context, error)
     return "An error occurred while running the tool. Please try again."
