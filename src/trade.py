@@ -133,36 +133,64 @@ class TRADE:
         
         return json.dumps(marketdata, ensure_ascii=False, indent=2)
     
-    def get_self_status(self):
-        url = f"{self.data_api_base}/positions"
-        params = {
-            "user": self.funder,
-        }
-        data = self.get(url, params=params)
-        self_status = []
+    def get_positions_v2(self, status: str = "OPEN") -> list[dict[str, Any]]:
+        """All position rows of the account from Data API v2.
 
-        for dat in data:
-            condition_id = dat['conditionId']
-            delta =  dat['currentValue'] - dat['size'] * dat['avgPrice']
+        Data API v1 (``/positions``) was retired on 2026-11-02 and answers
+        410 Gone.  v2 wraps rows in ``data`` (snake_case fields) and pages
+        with ``pagination.next_cursor``.
+        """
+        url = f"{self.data_api_base}/v2/positions"
+        params: dict[str, Any] = {"user": self.funder, "status": status, "limit": 500}
+        rows: list[dict[str, Any]] = []
+        seen_cursors: set[str] = set()
+        while True:
+            payload = self.get(url, params=params)
+            rows.extend(payload.get("data") or [])
+            cursor = (payload.get("pagination") or {}).get("next_cursor")
+            if not cursor or cursor in seen_cursors:
+                return rows
+            seen_cursors.add(cursor)
+            params["cursor"] = cursor
+
+    def get_self_status(self):
+        self_status = []
+        for dat in self.get_positions_v2():
+            size = float(dat["current_size"])
+            if size <= 0:
+                continue
+            avg_price = float(dat["avg_price"])
+            current_value = float(dat["current_value"])
+            price = float(dat.get("current_price") or current_value / size)
+            delta = float(dat.get("unrealized_pnl", current_value - size * avg_price))
             lines = []
             lines.append(f"タイトル: {dat['title']}")
             lines.append(f"あなたの所持トークン: {dat['outcome']}")
-            lines.append(f"あなたのトークン保有数: {dat['size']}")
-            lines.append(f"あなたのトークン購入時の平均買値(単価): ${dat['avgPrice']}")
-            lines.append(f"現在のトークン価値(単価): ${dat['currentValue'] / dat['size']}")
-            lines.append(f"あなたがトークン購入に費やした総額: ${dat['size'] * dat['avgPrice']}")
-            lines.append(f"今このトークンをすべて売却すると得られるお金: ${dat['currentValue']}")
-            lines.append(f"予想が当たった時、このトークンと交換できるお金: ${dat['size'] * 1.0}")
+            lines.append(f"あなたのトークン保有数: {size}")
+            lines.append(f"あなたのトークン購入時の平均買値(単価): ${avg_price}")
+            lines.append(f"現在のトークン価値(単価): ${price}")
+            lines.append(f"あなたがトークン購入に費やした総額: ${dat.get('total_cost_usdc', size * avg_price)}")
+            lines.append(f"今このトークンをすべて売却すると得られるお金: ${current_value}")
+            lines.append(f"予想が当たった時、このトークンと交換できるお金: ${size * 1.0}")
+            lines.append(f"含み損益: ${delta} ({dat.get('percent_pnl')}%)")
+            lines.append(f"市場の終了日: {dat.get('end_date')}")
             summary_text = "\n".join(lines)
             self_status.append({
-                "condition_id": condition_id,
+                "condition_id": dat["condition_id"],
+                "title": dat["title"],
                 "delta": delta,
+                "percent_pnl": dat.get("percent_pnl"),
                 "text": summary_text,
-                "token_name": dat['outcome'],
-                "token_id": dat["asset"],
-                "size": float(dat['size']),
-                "price": float(dat['currentValue'] / dat['size']),
-                "avr_price": float(dat['avgPrice'])
+                "token_name": dat["outcome"],
+                "token_id": dat["token_id"],
+                "size": size,
+                "price": price,
+                "avr_price": avg_price,
+                "current_value": current_value,
+                "end_date": dat.get("end_date"),
+                "redeemable": bool(dat.get("redeemable")),
+                "icon": dat.get("icon"),
+                "slug": dat.get("event_slug") or dat.get("slug"),
             })
         return self_status
 
