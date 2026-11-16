@@ -1,10 +1,8 @@
 """Single-user login for the web app.
 
-Credentials come from environment variables, falling back to the
-``[auth]`` section of ``.streamlit/secrets.toml`` used by the former
-Streamlit UI so that an existing setup keeps working:
+Credentials come only from environment variables; both are required:
 
-    POLYAGENT_USERNAME       (default: admin)
+    POLYAGENT_USERNAME
     POLYAGENT_PASSWORD_HASH  generate with:  python -m webapp.passwords 'password'
 
 Hashes made by werkzeug (``scrypt:...`` / ``pbkdf2:...``) are verified
@@ -19,9 +17,8 @@ import importlib.util
 import os
 import secrets
 import time
-import tomllib
 from functools import wraps
-from typing import Any, Callable
+from typing import Callable
 from urllib.parse import urlparse
 
 from flask import (
@@ -33,23 +30,17 @@ from . import PROJECT_ROOT
 
 bp = Blueprint("auth", __name__)
 
-LEGACY_SECRETS = PROJECT_ROOT / ".streamlit" / "secrets.toml"
+CREDENTIAL_VARS = ("POLYAGENT_USERNAME", "POLYAGENT_PASSWORD_HASH")
 LEGACY_HASHER = PROJECT_ROOT / "viewer" / "password_hash.py"
 
 
-def _legacy_auth_section() -> dict[str, Any]:
-    try:
-        with LEGACY_SECRETS.open("rb") as f:
-            return dict(tomllib.load(f).get("auth", {}))
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
-
-
 def credentials() -> tuple[str, str]:
-    legacy = _legacy_auth_section()
-    username = os.getenv("POLYAGENT_USERNAME") or legacy.get("username") or "admin"
-    password_hash = os.getenv("POLYAGENT_PASSWORD_HASH") or legacy.get("password_hash") or ""
-    return str(username), str(password_hash)
+    return os.getenv("POLYAGENT_USERNAME", ""), os.getenv("POLYAGENT_PASSWORD_HASH", "")
+
+
+def missing_credentials() -> list[str]:
+    """Names of the required environment variables that are not set."""
+    return [name for name in CREDENTIAL_VARS if not os.getenv(name)]
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
@@ -105,8 +96,9 @@ def _safe_next(target: str | None) -> str:
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     username, password_hash = credentials()
+    missing = missing_credentials()
     error = None
-    if request.method == "POST":
+    if request.method == "POST" and not missing:
         check_csrf()
         valid_user = hmac.compare_digest(request.form.get("username", ""), username)
         valid_password = verify_password(request.form.get("password", ""), password_hash)
@@ -118,7 +110,7 @@ def login():
             return redirect(_safe_next(request.args.get("next")))
         time.sleep(1.0)  # slow down guessing
         error = "ユーザー名またはパスワードが正しくありません。"
-    return render_template("login.html", error=error, configured=bool(password_hash))
+    return render_template("login.html", error=error, missing=missing)
 
 
 @bp.route("/logout", methods=["POST"])

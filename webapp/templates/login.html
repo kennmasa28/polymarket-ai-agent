@@ -13,20 +13,21 @@
   <form class="login-card" method="post">
     <div class="brand big"><span class="brand-mark">◆</span><span class="brand-name">PolyAgent</span></div>
     <p class="muted">Polymarket トレーディングエージェント</p>
-    {% if not configured %}
+    {% if missing %}
       <div class="callout danger">
-        <b>パスワードが設定されていません。</b><br>
-        <code>python -m webapp.passwords 'パスワード'</code> で作成したハッシュを
-        環境変数 <code>POLYAGENT_PASSWORD_HASH</code> に設定してから再起動してください。
+        <b>ログイン情報が設定されていません。</b><br>
+        次の環境変数を設定してから再起動してください:
+        {% for name in missing %}<code>{{ name }}</code>{{ "、" if not loop.last }}{% endfor %}<br>
+        ハッシュは <code>python -m webapp.passwords 'パスワード'</code> で作成できます。
       </div>
     {% endif %}
     {% if error %}<div class="callout danger">{{ error }}</div>{% endif %}
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label class="field"><span>ユーザー名</span>
-      <input name="username" autocomplete="username" required autofocus {{ 'disabled' if not configured }}></label>
+      <input name="username" autocomplete="username" required autofocus {{ 'disabled' if missing }}></label>
     <label class="field"><span>パスワード</span>
-      <input name="password" type="password" autocomplete="current-password" required {{ 'disabled' if not configured }}></label>
-    <button class="btn primary block" type="submit" {{ 'disabled' if not configured }}>ログイン</button>
+      <input name="password" type="password" autocomplete="current-password" required {{ 'disabled' if missing }}></label>
+    <button class="btn primary block" type="submit" {{ 'disabled' if missing }}>ログイン</button>
   </form>
 </body>
 </html>

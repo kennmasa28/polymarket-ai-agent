@@ -8,17 +8,27 @@ pip install -r requirements.txt
 python -m webapp.passwords 'your-password'      # prints a password hash
 ```
 
+Login credentials are read **only from environment variables**, and both are
+required (the login page says which one is missing). The hash contains `$`, so
+quote it with single quotes:
+
+```bash
+export POLYAGENT_USERNAME='your-name'
+export POLYAGENT_PASSWORD_HASH='scrypt:32768:8:1$...$...'   # the printed hash
+python -m webapp                                            # http://127.0.0.1:8000
+```
+
 ```powershell
-$env:POLYAGENT_USERNAME = "admin"               # optional (default: admin)
-$env:POLYAGENT_PASSWORD_HASH = 'scrypt:...'     # the printed hash
-python -m webapp                                # http://127.0.0.1:8000
+$env:POLYAGENT_USERNAME = 'your-name'
+$env:POLYAGENT_PASSWORD_HASH = 'scrypt:32768:8:1$...$...'
+python -m webapp
 ```
 
 Options: `python -m webapp --host 0.0.0.0 --port 8000`. When exposing it beyond
-localhost, put it behind HTTPS and set `POLYAGENT_SECURE_COOKIE=1`. An existing
-`.streamlit/secrets.toml` `[auth]` section and hashes made by the former
-`viewer/password_hash.py` are still accepted. The session key is stored in
-`instance/secret_key` (or set `FLASK_SECRET_KEY`).
+localhost, put it behind HTTPS and set `POLYAGENT_SECURE_COOKIE=1`. Hashes made
+by the former `viewer/password_hash.py` are still accepted when that local file
+exists. The session key is stored in `instance/secret_key` (or set
+`FLASK_SECRET_KEY`).
 
 Pages:
 
