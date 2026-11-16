@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ログイン · PolyAgent</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+</head>
+<body class="login-page">
+  <div class="login-glow"></div>
+  <form class="login-card" method="post">
+    <div class="brand big"><span class="brand-mark">◆</span><span class="brand-name">PolyAgent</span></div>
+    <p class="muted">Polymarket トレーディングエージェント</p>
+    {% if not configured %}
+      <div class="callout danger">
+        <b>パスワードが設定されていません。</b><br>
+        <code>python -m webapp.passwords 'パスワード'</code> で作成したハッシュを
+        環境変数 <code>POLYAGENT_PASSWORD_HASH</code> に設定してから再起動してください。
+      </div>
+    {% endif %}
+    {% if error %}<div class="callout danger">{{ error }}</div>{% endif %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="field"><span>ユーザー名</span>
+      <input name="username" autocomplete="username" required autofocus {{ 'disabled' if not configured }}></label>
+    <label class="field"><span>パスワード</span>
+      <input name="password" type="password" autocomplete="current-password" required {{ 'disabled' if not configured }}></label>
+    <button class="btn primary block" type="submit" {{ 'disabled' if not configured }}>ログイン</button>
+  </form>
+</body>
+</html>

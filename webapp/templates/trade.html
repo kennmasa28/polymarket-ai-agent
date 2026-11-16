@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}トレード · PolyAgent{% endblock %}
+{% block main %}
+<div class="page-scroll"><div class="page-inner">
+  <div class="page-head">
+    <div><h1>トレード</h1><p>マーケットを探して手動で売買します。注文は確認ダイアログの後に送信されます。</p></div>
+    <div class="tabs" id="trade-tabs">
+      <button class="tab active" data-tab="buy">🛒 購入</button>
+      <button class="tab" data-tab="hold">💼 保有・売却</button>
+    </div>
+  </div>
+
+  <div class="kpis" id="pf-kpis" style="margin-bottom:18px"></div>
+
+  <section id="tab-buy">
+    <div class="trade-grid">
+      <div class="stack">
+        <div class="card card-pad">
+          <form class="search-bar" id="search">
+            <input id="slug" placeholder="イベントの slug または polymarket.com/event/... の URL" autocomplete="off">
+            <button class="btn primary" type="submit">検索</button>
+          </form>
+          <div class="chips" style="margin-top:12px" id="tags"></div>
+        </div>
+        <div class="card card-pad" id="trending-card">
+          <div class="card-head"><div class="card-title"><span class="dot"></span><span id="trending-title">注目のイベント</span></div></div>
+          <div class="event-cards" id="trending"></div>
+        </div>
+        <div class="card card-pad hidden" id="event-card"></div>
+      </div>
+      <aside class="ticket" id="ticket">
+        <div class="card card-pad"><div class="empty"><div class="big">🎯</div>マーケットとアウトカムを選ぶと<br>注文チケットが表示されます</div></div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="tab-hold" class="hidden">
+    <div class="card card-pad">
+      <div class="card-head"><div class="card-title"><span class="dot"></span>保有ポジション</div>
+        <button class="btn sm" id="reload-positions">↻ 更新</button></div>
+      <div id="positions"></div>
+    </div>
+  </section>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/trade.js') }}"></script>
+{% endblock %}

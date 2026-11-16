@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}ログ分析 · PolyAgent{% endblock %}
+{% block main %}
+<div class="logs-layout" id="layout" data-session="{{ session_id }}">
+  <aside class="session-list">
+    <div class="head">
+      <button class="btn block" id="go-overview">🌐 全体サマリー</button>
+      <input id="session-search" placeholder="セッションを検索…" autocomplete="off">
+      <div class="seg" id="source-filter">
+        <button class="active" data-src="">すべて</button><button data-src="ui">UI</button><button data-src="cli">CLI</button>
+      </div>
+    </div>
+    <div class="session-items" id="sessions"><div class="skeleton" style="height:48px;margin:8px"></div></div>
+  </aside>
+  <section class="page-scroll">
+    <div class="page-inner" id="view"></div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/logs.js') }}"></script>
+{% endblock %}

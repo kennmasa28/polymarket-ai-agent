@@ -1,6 +1,6 @@
 """Interactive Polymarket trading chat powered by the OpenAI Agents SDK.
 
-The Streamlit UI (``streamlit run viewer/view_app.py``) offers the same agent
+The web app (``python -m webapp``) offers the same agent
 with a richer interface; this module is the terminal version.
 """
 
